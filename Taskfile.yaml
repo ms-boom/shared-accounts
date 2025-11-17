@@ -1,0 +1,139 @@
+version: '3'
+
+vars:
+  PYTHON_SOURCE: bot  # TODO: Update to your package name if different
+  TEST_SOURCE: tests
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # Development setup
+  install:
+    desc: Install development dependencies
+    cmds:
+      - uv sync --group dev
+
+  # Code formatting
+  format:
+    desc: Format code with ruff
+    cmds:
+      - ruff check --fix {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+      - ruff format {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+
+  # Linting
+  lint:
+    desc: Run all linting tools
+    cmds:
+      - task: lint:ruff
+      - task: lint:mypy
+
+  lint:ruff:
+    desc: Run ruff linter and formatter checks
+    cmds:
+      - ruff check {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+      - ruff format --check {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+
+  lint:mypy:
+    desc: Run type checking with mypy
+    cmds:
+      - mypy {{.PYTHON_SOURCE}}
+
+  # Testing
+  test:
+    desc: Run tests with pytest
+    cmds:
+      - pytest {{.CLI_ARGS}}
+
+  test:unit:
+    desc: Run unit tests only
+    cmds:
+      - pytest -m unit
+
+  test:integration:
+    desc: Run integration tests only
+    cmds:
+      - pytest -m integration
+
+  coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - pytest --cov={{.PYTHON_SOURCE}} --cov-report=html --cov-report=term-missing
+
+  # Pre-commit hooks
+  prek:install:
+    desc: Install pre-commit hooks
+    cmds:
+      - prek install
+
+  prek:
+    desc: Run pre-commit hooks manually
+    cmds:
+      - prek run --all-files
+
+  prek:update:
+    desc: Update pre-commit hooks to latest versions
+    cmds:
+      - prek autoupdate
+
+  # Quality workflows
+  check:
+    desc: Run all quality checks (lint + test)
+    cmds:
+      - task: lint
+      - task: test
+
+  qa:
+    desc: Full quality assurance (format + lint + test + coverage)
+    cmds:
+      - task: format
+      - task: lint
+      - task: coverage
+
+  dev:
+    desc: Development workflow (install + format + check)
+    cmds:
+      - task: install
+      - task: format
+      - task: check
+
+  # Database migrations
+  db:upgrade:
+    desc: Apply database migrations
+    cmds:
+      - alembic upgrade head
+
+  db:downgrade:
+    desc: Rollback one migration
+    cmds:
+      - alembic downgrade -1
+
+  db:revision:
+    desc: Create a new migration (use -- -m "message")
+    cmds:
+      - alembic revision --autogenerate {{.CLI_ARGS}}
+
+  db:current:
+    desc: Show current migration version
+    cmds:
+      - alembic current
+
+  # Bot running
+  run:
+    desc: Run the bot
+    cmds:
+      - python -m bot
+
+  # Clean up
+  clean:
+    desc: Clean up temporary files and cache
+    cmds:
+      - find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+      - find . -type f -name "*.pyc" -delete
+      - rm -rf .pytest_cache
+      - rm -rf htmlcov
+      - rm -rf .coverage
+      - rm -rf .mypy_cache
+      - rm -rf .ruff_cache
