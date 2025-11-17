@@ -22,12 +22,13 @@ class ChatSessionRepository:
         """
         self.db = database
 
-    async def get_by_chat_id(self, chat_id: int) -> dict | None:
+    async def get_by_chat_id(self, chat_id: int, thread_id: int = 0) -> dict | None:
         """
-        Get chat session by chat_id.
+        Get chat session by chat_id and thread_id.
 
         Args:
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             ChatSession data as dict or None if not found
@@ -36,15 +37,17 @@ class ChatSessionRepository:
             DatabaseError: If database query fails
         """
         query = """
-            SELECT chat_id, email, session_path, created_at, last_used
+            SELECT chat_id, thread_id, email, session_path, created_at, last_used
             FROM chat_sessions
-            WHERE chat_id = :chat_id
+            WHERE chat_id = :chat_id AND thread_id = :thread_id
         """
         try:
-            result = await self.db.fetch_one(query, {"chat_id": chat_id})
+            result = await self.db.fetch_one(
+                query, {"chat_id": chat_id, "thread_id": thread_id}
+            )
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to get chat session for {chat_id}: {e}")
+            logger.error(f"Failed to get chat session for {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to get chat session: {e}") from e
 
     async def create(
@@ -52,6 +55,7 @@ class ChatSessionRepository:
         chat_id: int,
         email: str,
         session_path: str,
+        thread_id: int = 0,
     ) -> dict:
         """
         Create a new chat session record.
@@ -60,6 +64,7 @@ class ChatSessionRepository:
             chat_id: Telegram chat_id
             email: Email address for Claude account
             session_path: Path to Playwright session data
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             Created chat session data as dict
@@ -68,13 +73,14 @@ class ChatSessionRepository:
             DatabaseError: If database operation fails
         """
         query = """
-            INSERT INTO chat_sessions (chat_id, email, session_path, created_at)
-            VALUES (:chat_id, :email, :session_path, :created_at)
-            RETURNING chat_id, email, session_path, created_at, last_used
+            INSERT INTO chat_sessions (chat_id, thread_id, email, session_path, created_at)
+            VALUES (:chat_id, :thread_id, :email, :session_path, :created_at)
+            RETURNING chat_id, thread_id, email, session_path, created_at, last_used
         """
         now = datetime.utcnow()
         values = {
             "chat_id": chat_id,
+            "thread_id": thread_id,
             "email": email,
             "session_path": session_path,
             "created_at": now,
@@ -82,18 +88,21 @@ class ChatSessionRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Created chat session for {chat_id} ({email})")
+            logger.info(f"Created chat session for {chat_id}/{thread_id} ({email})")
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to create chat session for {chat_id}: {e}")
+            logger.error(
+                f"Failed to create chat session for {chat_id}/{thread_id}: {e}"
+            )
             raise DatabaseError(f"Failed to create chat session: {e}") from e
 
-    async def update_last_used(self, chat_id: int) -> dict | None:
+    async def update_last_used(self, chat_id: int, thread_id: int = 0) -> dict | None:
         """
         Update last_used timestamp for a chat session.
 
         Args:
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             Updated chat session data as dict or None if not found
@@ -104,29 +113,31 @@ class ChatSessionRepository:
         query = """
             UPDATE chat_sessions
             SET last_used = :last_used
-            WHERE chat_id = :chat_id
-            RETURNING chat_id, email, session_path, created_at, last_used
+            WHERE chat_id = :chat_id AND thread_id = :thread_id
+            RETURNING chat_id, thread_id, email, session_path, created_at, last_used
         """
         values = {
             "chat_id": chat_id,
+            "thread_id": thread_id,
             "last_used": datetime.utcnow(),
         }
 
         try:
             result = await self.db.fetch_one(query, values)
             if result:
-                logger.info(f"Updated last_used for chat session {chat_id}")
+                logger.info(f"Updated last_used for chat session {chat_id}/{thread_id}")
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to update last_used for {chat_id}: {e}")
+            logger.error(f"Failed to update last_used for {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to update last_used: {e}") from e
 
-    async def delete(self, chat_id: int) -> bool:
+    async def delete(self, chat_id: int, thread_id: int = 0) -> bool:
         """
         Delete a chat session.
 
         Args:
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             True if deleted, False if not found
@@ -136,14 +147,16 @@ class ChatSessionRepository:
         """
         query = """
             DELETE FROM chat_sessions
-            WHERE chat_id = :chat_id
+            WHERE chat_id = :chat_id AND thread_id = :thread_id
         """
         try:
-            await self.db.execute(query, {"chat_id": chat_id})
-            logger.info(f"Deleted chat session for {chat_id}")
+            await self.db.execute(query, {"chat_id": chat_id, "thread_id": thread_id})
+            logger.info(f"Deleted chat session for {chat_id}/{thread_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete chat session for {chat_id}: {e}")
+            logger.error(
+                f"Failed to delete chat session for {chat_id}/{thread_id}: {e}"
+            )
             raise DatabaseError(f"Failed to delete chat session: {e}") from e
 
     async def upsert(
@@ -151,6 +164,7 @@ class ChatSessionRepository:
         chat_id: int,
         email: str,
         session_path: str,
+        thread_id: int = 0,
     ) -> dict:
         """
         Insert or update a chat session (handles concurrent initialization).
@@ -159,6 +173,7 @@ class ChatSessionRepository:
             chat_id: Telegram chat_id
             email: Email address for Claude account
             session_path: Path to Playwright session data
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             Created or updated chat session data as dict
@@ -167,17 +182,18 @@ class ChatSessionRepository:
             DatabaseError: If database operation fails
         """
         query = """
-            INSERT INTO chat_sessions (chat_id, email, session_path, created_at)
-            VALUES (:chat_id, :email, :session_path, :created_at)
-            ON CONFLICT (chat_id)
+            INSERT INTO chat_sessions (chat_id, thread_id, email, session_path, created_at)
+            VALUES (:chat_id, :thread_id, :email, :session_path, :created_at)
+            ON CONFLICT (chat_id, thread_id)
             DO UPDATE SET
                 email = EXCLUDED.email,
                 session_path = EXCLUDED.session_path
-            RETURNING chat_id, email, session_path, created_at, last_used
+            RETURNING chat_id, thread_id, email, session_path, created_at, last_used
         """
         now = datetime.utcnow()
         values = {
             "chat_id": chat_id,
+            "thread_id": thread_id,
             "email": email,
             "session_path": session_path,
             "created_at": now,
@@ -185,18 +201,21 @@ class ChatSessionRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Upserted chat session for {chat_id} ({email})")
+            logger.info(f"Upserted chat session for {chat_id}/{thread_id} ({email})")
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to upsert chat session for {chat_id}: {e}")
+            logger.error(
+                f"Failed to upsert chat session for {chat_id}/{thread_id}: {e}"
+            )
             raise DatabaseError(f"Failed to upsert chat session: {e}") from e
 
-    async def lock_for_update(self, chat_id: int) -> dict | None:
+    async def lock_for_update(self, chat_id: int, thread_id: int = 0) -> dict | None:
         """
         Lock chat session for update (prevents concurrent initialization).
 
         Args:
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             Locked chat session data as dict or None if not found
@@ -209,16 +228,18 @@ class ChatSessionRepository:
             Other transactions will wait or skip (SKIP LOCKED) this row.
         """
         query = """
-            SELECT chat_id, email, session_path, created_at, last_used
+            SELECT chat_id, thread_id, email, session_path, created_at, last_used
             FROM chat_sessions
-            WHERE chat_id = :chat_id
+            WHERE chat_id = :chat_id AND thread_id = :thread_id
             FOR UPDATE
         """
         try:
-            result = await self.db.fetch_one(query, {"chat_id": chat_id})
+            result = await self.db.fetch_one(
+                query, {"chat_id": chat_id, "thread_id": thread_id}
+            )
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to lock chat session {chat_id}: {e}")
+            logger.error(f"Failed to lock chat session {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to lock chat session: {e}") from e
 
     async def get_all_active(self) -> list[dict]:
@@ -232,7 +253,7 @@ class ChatSessionRepository:
             DatabaseError: If database query fails
         """
         query = """
-            SELECT chat_id, email, session_path, created_at, last_used
+            SELECT chat_id, thread_id, email, session_path, created_at, last_used
             FROM chat_sessions
             ORDER BY last_used DESC NULLS LAST, created_at DESC
         """

@@ -1,17 +1,18 @@
-# Telegram Bot Template
+# Claude Authorization Bot
 
-Production-ready Telegram bot template with group management, built with aiogram 3.x, SQLAlchemy, and modern Python practices.
+Telegram bot для автоматизации получения авторизационных кодов Claude Code через headless браузер (Playwright).
 
 ## Features
 
-- **Group Management**: Automatic group registration, permission checking with caching
-- **Clean Architecture**: Separation of concerns with services, repositories, and handlers
-- **Dependency Injection**: Using punq for clean dependency management
-- **Database Support**: SQLAlchemy 2.0 with async support, Alembic migrations
-- **FSM States**: Built-in FSM for complex dialogues
-- **Type Safety**: Full type hints with mypy strict mode
-- **Code Quality**: Configured ruff linter, pre-commit hooks
-- **Modern Python**: Python 3.12+, async/await throughout
+- **Claude Authentication Automation**: Автоматическая инициализация сессий и извлечение auth кодов
+- **Telegram Topics Support**: Независимые сессии для каждого топика в супергруппе (thread_id)
+- **Headless Browser**: Playwright для автоматизации взаимодействия с Claude.ai
+- **Task Queue**: PostgreSQL-based очередь задач с поддержкой параллельной обработки (FOR UPDATE SKIP LOCKED)
+- **Group Management**: Контроль доступа (только админы инициализируют сессии)
+- **Clean Architecture**: Разделение на handlers, services, repositories, worker
+- **Session Isolation**: Изолированные браузерные сессии для каждого чата/топика
+- **Type Safety**: Полная типизация с mypy, современный Python 3.12+
+- **Code Quality**: ruff linter, pre-commit hooks, pytest
 
 ## Quick Start
 
@@ -21,6 +22,8 @@ Production-ready Telegram bot template with group management, built with aiogram
 - [uv](https://docs.astral.sh/uv/) package manager
 - [Task](https://taskfile.dev/) for running commands (optional but recommended)
 - Telegram Bot Token from [@BotFather](https://t.me/botfather)
+- PostgreSQL 15+ database
+- Docker & Docker Compose (for production deployment)
 
 ### Installation
 
@@ -38,7 +41,9 @@ Production-ready Telegram bot template with group management, built with aiogram
 3. **Configure environment**
    ```bash
    cp .env.example .env
-   # Edit .env and add your TELEGRAM_TOKEN
+   # Edit .env and add:
+   # - TELEGRAM_TOKEN (from @BotFather)
+   # - DATABASE_URL (PostgreSQL connection string)
    ```
 
 4. **Run database migrations**
@@ -56,14 +61,20 @@ Production-ready Telegram bot template with group management, built with aiogram
    task prek:install
    ```
 
-6. **Run the bot**
+6. **Run the bot and worker**
+
+   Using Docker Compose (recommended):
    ```bash
-   task run
+   docker-compose up
    ```
 
-   Or manually:
+   Or manually (requires two terminals):
    ```bash
+   # Terminal 1: Bot service
    python -m bot
+
+   # Terminal 2: Worker service
+   python -m bot.worker
    ```
 
 ## Project Structure
@@ -77,23 +88,38 @@ Production-ready Telegram bot template with group management, built with aiogram
 │   │   ├── exceptions.py      # Custom exceptions
 │   │   └── logging_config.py  # Logging setup
 │   ├── db/                     # Database layer
-│   │   ├── models.py          # SQLAlchemy models
+│   │   ├── models.py          # SQLAlchemy models (ChatSession, Task)
 │   │   ├── database.py        # Database connection
 │   │   └── repositories/      # Repository pattern
+│   │       ├── chat_session_repository.py
+│   │       ├── task_repository.py
+│   │       └── ...
 │   ├── services/               # Business logic
-│   │   ├── group_service.py
 │   │   ├── permission_service.py
 │   │   └── user_service.py
-│   ├── filters/                # Aiogram filters
-│   ├── middleware/             # Middleware
+│   ├── worker/                 # Background task processing
+│   │   ├── task_worker.py     # Main worker loop
+│   │   ├── playwright_service.py  # Playwright automation
+│   │   └── __main__.py        # Worker entry point
 │   ├── handlers/               # Message handlers
-│   ├── states/                 # FSM states
-│   └── __main__.py            # Entry point
+│   │   ├── claude_auth.py     # /init_session, /get_code, /health
+│   │   └── ...
+│   ├── middleware/             # Middleware
+│   ├── filters/                # Aiogram filters
+│   └── __main__.py            # Bot entry point
 ├── migrations/                 # Alembic migrations
+│   └── versions/
+│       ├── 001_initial_schema.py
+│       └── 002_add_topic_support.py
+├── features/                   # Feature documentation
 ├── tests/                      # Tests
+├── docker-compose.yml         # Docker services config
+├── Dockerfile                 # Bot service image
+├── Dockerfile.worker          # Worker service image
 ├── .env.example               # Environment template
 ├── pyproject.toml             # Project config
 ├── Taskfile.yaml              # Task runner config
+├── CLAUDE.md                  # Full project documentation
 └── README.md                  # This file
 ```
 
@@ -131,10 +157,21 @@ Without Task, use the commands directly:
 ```bash
 uv sync --group dev            # Install dependencies
 python -m bot                   # Run bot
+python -m bot.worker            # Run worker
 ruff check --fix bot tests     # Format code
 mypy bot                        # Type check
 pytest                          # Run tests
 ```
+
+## Bot Usage
+
+Once the bot is running, use these commands in Telegram:
+
+- `/init_session <email>` - Initialize Claude session (admin only in groups)
+- `/get_code <auth_url>` - Extract authorization code from Claude URL
+- `/health` - Check bot status and active sessions
+
+**Topics Support**: All commands work in both main chat and topics. Each topic gets an independent session isolated from others.
 
 ## Configuration
 
@@ -143,89 +180,101 @@ All configuration is done via environment variables in `.env`:
 ```env
 # Required
 TELEGRAM_TOKEN=your_bot_token_here
+DATABASE_URL=postgresql+asyncpg://user:pass@postgres/claude_bot
 
 # Optional
-DATABASE_URL=sqlite+aiosqlite:///./bot.db
 LOG_LEVEL=INFO
 DEBUG=False
-FSM_STORAGE_TYPE=memory
-PERMISSION_CACHE_TTL=300
+PLAYWRIGHT_HEADLESS=true
+PLAYWRIGHT_TIMEOUT=30000
+WORKER_POLL_INTERVAL=2
+SESSION_DIR=/data/sessions
+ERROR_DIR=/data/errors
 ```
 
 ## Architecture Patterns
 
+### Worker Pattern + Task Queue
+The bot uses a PostgreSQL-based task queue with worker processes:
+
+```
+Bot (aiogram) → Tasks Table → Worker (Playwright)
+```
+
+Tasks are processed with `SELECT FOR UPDATE SKIP LOCKED` for concurrent safety.
+
 ### Repository Pattern
-All database operations go through repositories for clean separation:
+All database operations go through repositories:
 
 ```python
-group_repository = GroupRepository(database)
-group = await group_repository.get_by_id(chat_id)
+session_repo = ChatSessionRepository(database)
+session = await session_repo.get_by_chat_id(chat_id, thread_id)
 ```
 
-### Service Layer
-Business logic is encapsulated in services:
+### Session Isolation
+Each (chat_id, thread_id) pair gets an isolated Playwright browser context:
+
+```
+/data/sessions/
+├── {chat_id}/              # Main chat sessions
+│   └── state.json
+└── {chat_id}/{thread_id}/  # Topic sessions
+    └── state.json
+```
+
+### Topics Support
+All handlers extract thread_id automatically:
 
 ```python
-group_service = GroupService(database)
-await group_service.register_group(chat)
+def get_thread_id(message: Message) -> int:
+    return message.message_thread_id if message.message_thread_id else 0
 ```
 
-### Permission Checking
-Built-in permission service with caching:
+thread_id = 0 means main chat, >0 means topic.
 
-```python
-@router.message(Command("admin"), IsGroupAdmin())
-async def admin_handler(message: Message):
-    # Only admins can reach here
-    pass
-```
+## How It Works
 
-### Automatic Group Registration
-Groups are automatically registered when bot interacts with them via middleware.
+### User Journey
 
-## Adding Your Own Features
+1. **Initialize Session**
+   - User: `/init_session user@example.com` (in chat or topic)
+   - Bot: Creates task, worker opens claude.ai, fills email
+   - Worker: Sends "Check your email" screenshot
+   - User receives: "Email sent! Please send the authorization link"
 
-### 1. Create a New Handler
+2. **Process Login Link**
+   - User: Forwards Claude login link from email
+   - Bot: Detects URL, creates process_login_link task
+   - Worker: Opens link, waits for authentication
+   - User receives: "Session initialized successfully!"
 
-```python
-# bot/handlers/my_feature.py
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.types import Message
+3. **Extract Authorization Code**
+   - User: `/get_code https://claude.ai/auth/authorize?...`
+   - Bot: Creates get_code task
+   - Worker: Opens URL, extracts code from page
+   - User receives: "Authorization code: ABC123XYZ"
 
-router = Router(name="my_feature")
+### Adding New Task Types
 
-@router.message(Command("mycommand"))
-async def my_command_handler(message: Message):
-    await message.reply("Hello from my feature!")
-```
+1. Define task processor in `bot/worker/task_worker.py`:
+   ```python
+   async def process_my_task(self, task_id, chat_id, thread_id, payload):
+       # Your logic here
+       result = await self.playwright.do_something(...)
+       await self.task_repo.update_status(task_id, "done", result)
+       await self.send_message(chat_id, result, thread_id)
+   ```
 
-### 2. Register the Router
-
-```python
-# bot/__main__.py
-from bot.handlers import my_feature
-
-# ...
-dp.include_router(my_feature.router)
-```
-
-### 3. Create Database Models (if needed)
-
-```python
-# bot/db/models.py
-class MyModel(Base):
-    __tablename__ = "my_table"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    # ... your fields
-```
-
-### 4. Create Migration
-
-```bash
-task db:revision -- -m "add my_table"
-task db:upgrade
-```
+2. Add handler in `bot/handlers/`:
+   ```python
+   await task_repo.create(
+       chat_id=message.chat.id,
+       user_id=message.from_user.id,
+       task_type="my_task",
+       payload={"key": "value"},
+       thread_id=get_thread_id(message)
+   )
+   ```
 
 ## Development Workflow
 
@@ -250,32 +299,65 @@ pytest tests/unit/test_services.py
 
 ## Production Deployment
 
-1. **Use PostgreSQL** instead of SQLite:
-   ```env
-   DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
+### Using Docker Compose (Recommended)
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env with your TELEGRAM_TOKEN and other settings
+
+# 2. Start all services
+docker-compose up -d
+
+# 3. Check logs
+docker-compose logs -f bot
+docker-compose logs -f worker
+
+# 4. Stop services
+docker-compose down
+```
+
+Services:
+- `postgres` - PostgreSQL database
+- `bot` - Telegram bot service (aiogram)
+- `worker` - Task worker service (Playwright)
+
+### Manual Deployment
+
+1. **Install Playwright browsers**:
+   ```bash
+   playwright install chromium
    ```
 
-2. **Use Redis for FSM**:
-   ```env
-   FSM_STORAGE_TYPE=redis
-   REDIS_URL=redis://localhost:6379/0
-   ```
-
-3. **Set production settings**:
+2. **Set production settings**:
    ```env
    DEBUG=False
    LOG_LEVEL=WARNING
+   PLAYWRIGHT_HEADLESS=true
    ```
 
-4. **Run migrations**:
+3. **Run migrations**:
    ```bash
    alembic upgrade head
    ```
 
-5. **Use process manager** (systemd, supervisor, docker):
+4. **Start services** (use systemd or supervisor):
    ```bash
+   # Service 1: Bot
    python -m bot
+
+   # Service 2: Worker (can run multiple instances)
+   python -m bot.worker
    ```
+
+### Scaling
+
+Run multiple worker instances for better throughput:
+```bash
+docker-compose up -d --scale worker=3
+```
+
+Workers use PostgreSQL locking (`FOR UPDATE SKIP LOCKED`), so multiple instances can safely process tasks concurrently.
 
 ## Code Quality Tools
 
@@ -286,13 +368,20 @@ pytest tests/unit/test_services.py
 
 ## Principles
 
-This template follows "Functional Clarity" principles:
+This project follows "Functional Clarity" principles:
 
-- **Limited Responsibility**: Each module does one thing
-- **Explicit Errors**: Fail-fast with clear error messages
-- **Minimal Dependencies**: Only essential external packages
-- **Type Safety**: Full type hints throughout
-- **Testability**: Easy to test with mocked dependencies
+- **Limited Responsibility**: Each function/module does one thing (functions 20-30 lines max)
+- **Explicit Errors**: Fail-fast with custom exception classes and clear error messages
+- **Minimal Dependencies**: Standard library first, external packages only when necessary
+- **Type Safety**: Full type hints with mypy strict mode
+- **Testability**: Pure functions, explicit inputs/outputs, isolated side effects
+- **Modern Python**: 3.12+, async/await, pathlib, context managers
+
+See [CLAUDE.md](CLAUDE.md) for full project documentation including:
+- Complete architecture overview
+- Feature design documents (features/ directory)
+- Development practices and style guide
+- Database schema and migration strategy
 
 ## License
 

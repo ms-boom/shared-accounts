@@ -38,7 +38,7 @@ class TaskRepository:
             DatabaseError: If database query fails
         """
         query = """
-            SELECT id, chat_id, user_id, task_type, payload, status,
+            SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
                    result, created_at, updated_at
             FROM tasks
             WHERE id = :task_id
@@ -56,6 +56,7 @@ class TaskRepository:
         user_id: int,
         task_type: str,
         payload: dict[str, Any],
+        thread_id: int = 0,
     ) -> dict:
         """
         Create a new task.
@@ -65,6 +66,7 @@ class TaskRepository:
             user_id: Telegram user_id who initiated task
             task_type: Task type ('init_session' or 'get_code')
             payload: Task-specific payload
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
 
         Returns:
             Created task data as dict
@@ -73,14 +75,15 @@ class TaskRepository:
             DatabaseError: If database operation fails
         """
         query = """
-            INSERT INTO tasks (chat_id, user_id, task_type, payload, status, created_at, updated_at)
-            VALUES (:chat_id, :user_id, :task_type, :payload, :status, :created_at, :updated_at)
-            RETURNING id, chat_id, user_id, task_type, payload, status,
+            INSERT INTO tasks (chat_id, thread_id, user_id, task_type, payload, status, created_at, updated_at)
+            VALUES (:chat_id, :thread_id, :user_id, :task_type, :payload, :status, :created_at, :updated_at)
+            RETURNING id, chat_id, thread_id, user_id, task_type, payload, status,
                       result, created_at, updated_at
         """
         now = datetime.utcnow()
         values = {
             "chat_id": chat_id,
+            "thread_id": thread_id,
             "user_id": user_id,
             "task_type": task_type,
             "payload": payload,
@@ -93,10 +96,10 @@ class TaskRepository:
             result = await self.db.fetch_one(query, values)
             if result is None:
                 raise DatabaseError("INSERT RETURNING returned None")
-            logger.info(f"Created task {result['id']} for chat {chat_id}")
+            logger.info(f"Created task {result['id']} for chat {chat_id}/{thread_id}")
             return dict(result)
         except Exception as e:
-            logger.error(f"Failed to create task for chat {chat_id}: {e}")
+            logger.error(f"Failed to create task for chat {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to create task: {e}") from e
 
     async def update_status(
@@ -125,7 +128,7 @@ class TaskRepository:
                 result = :result,
                 updated_at = :updated_at
             WHERE id = :task_id
-            RETURNING id, chat_id, user_id, task_type, payload, status,
+            RETURNING id, chat_id, thread_id, user_id, task_type, payload, status,
                       result, created_at, updated_at
         """
         values = {
@@ -161,7 +164,7 @@ class TaskRepository:
         """
         # First, select and lock the next pending task
         select_query = """
-            SELECT id, chat_id, user_id, task_type, payload, status,
+            SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
                    result, created_at, updated_at
             FROM tasks
             WHERE status = 'pending'
@@ -181,7 +184,7 @@ class TaskRepository:
                 SET status = 'processing',
                     updated_at = :updated_at
                 WHERE id = :task_id
-                RETURNING id, chat_id, user_id, task_type, payload, status,
+                RETURNING id, chat_id, thread_id, user_id, task_type, payload, status,
                           result, created_at, updated_at
             """
             values = {
@@ -223,13 +226,15 @@ class TaskRepository:
         self,
         chat_id: int,
         limit: int = 10,
+        thread_id: int | None = None,
     ) -> list[dict]:
         """
-        Get tasks for a specific chat.
+        Get tasks for a specific chat or topic.
 
         Args:
             chat_id: Telegram chat_id
             limit: Maximum number of tasks to return
+            thread_id: Optional thread_id filter (None = all threads)
 
         Returns:
             List of tasks as dicts
@@ -237,18 +242,29 @@ class TaskRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT id, chat_id, user_id, task_type, payload, status,
-                   result, created_at, updated_at
-            FROM tasks
-            WHERE chat_id = :chat_id
-            ORDER BY created_at DESC
-            LIMIT :limit
-        """
+        if thread_id is not None:
+            query = """
+                SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
+                       result, created_at, updated_at
+                FROM tasks
+                WHERE chat_id = :chat_id AND thread_id = :thread_id
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """
+            params = {"chat_id": chat_id, "thread_id": thread_id, "limit": limit}
+        else:
+            query = """
+                SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
+                       result, created_at, updated_at
+                FROM tasks
+                WHERE chat_id = :chat_id
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """
+            params = {"chat_id": chat_id, "limit": limit}
+
         try:
-            results = await self.db.fetch_all(
-                query, {"chat_id": chat_id, "limit": limit}
-            )
+            results = await self.db.fetch_all(query, params)
             return [dict(row) for row in results]
         except Exception as e:
             logger.error(f"Failed to get tasks for chat {chat_id}: {e}")
