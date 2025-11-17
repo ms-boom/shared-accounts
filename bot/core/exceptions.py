@@ -35,3 +35,21 @@ class UserNotFoundError(BotError):
     """Raised when a user is not found in the database."""
 
     pass
+
+
+class BrowserError(BotError):
+    """Raised when Playwright browser operations fail."""
+
+    pass
+
+
+class SessionError(BotError):
+    """Raised when Claude session operations fail."""
+
+    pass
+
+
+class TaskError(BotError):
+    """Raised when task processing fails."""
+
+    pass

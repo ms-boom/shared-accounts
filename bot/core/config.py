@@ -58,6 +58,54 @@ class Settings(BaseSettings):
         description="Permission cache TTL in seconds (default: 5 minutes)",
     )
 
+    # Claude Authorization Bot Settings
+    DATA_DIR: Path = Field(
+        default=Path("/data"),
+        description="Base directory for data storage",
+    )
+    SESSION_DIR: Path = Field(
+        default=Path("/data/sessions"),
+        description="Directory for Playwright browser sessions",
+    )
+    LOG_DIR: Path = Field(
+        default=Path("/data/logs"),
+        description="Directory for log files",
+    )
+    ERROR_DIR: Path = Field(
+        default=Path("/data/errors"),
+        description="Directory for error screenshots",
+    )
+
+    # Playwright Settings
+    PLAYWRIGHT_HEADLESS: bool = Field(
+        default=True,
+        description="Run Playwright in headless mode",
+    )
+    PLAYWRIGHT_TIMEOUT: int = Field(
+        default=30000,
+        description="Playwright operation timeout in milliseconds (default: 30s)",
+    )
+
+    # Worker Settings
+    WORKER_POLL_INTERVAL: float = Field(
+        default=1.0,
+        description="Worker task polling interval in seconds",
+    )
+    WORKER_RETRY_ATTEMPTS: int = Field(
+        default=3,
+        description="Number of retry attempts for failed operations",
+    )
+    WORKER_RETRY_BACKOFF: str = Field(
+        default="2,4,8",
+        description="Retry backoff delays in seconds (comma-separated)",
+    )
+
+    @field_validator("DATA_DIR", "SESSION_DIR", "LOG_DIR", "ERROR_DIR")
+    @classmethod
+    def ensure_path(cls, value: Path | str) -> Path:
+        """Ensure value is a Path object."""
+        return Path(value) if isinstance(value, str) else value
+
     @field_validator("TELEGRAM_TOKEN")
     @classmethod
     def validate_telegram_token(cls, value: str) -> str:

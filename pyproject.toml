@@ -1,7 +1,7 @@
 [project]
 name = "shared-accounts"
 version = "0.1.0"
-description = "Production-ready Telegram bot template with group management"
+description = "Claude Authorization Bot - automates Claude Code authorization via Telegram"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,8 +12,11 @@ dependencies = [
     "alembic>=1.14.0",
     "databases>=0.9.0",
     "aiosqlite>=0.20.0",
+    "asyncpg>=0.30.0",
     "punq>=0.7.0",
     "python-dotenv>=1.0.1",
+    "playwright>=1.40.0",
+    "structlog>=23.0.0",
 ]
 
 [dependency-groups]
@@ -96,6 +99,8 @@ module = [
     "aiogram.*",
     "punq.*",
     "databases.*",
+    "playwright.*",
+    "structlog.*",
 ]
 ignore_missing_imports = true
 
