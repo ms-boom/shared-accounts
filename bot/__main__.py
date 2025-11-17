@@ -13,7 +13,7 @@ from bot.core.config import get_settings
 from bot.core.container import create_container
 from bot.core.logging_config import setup_logging
 from bot.db.database import Database
-from bot.handlers import common, group_admin, group_events
+from bot.handlers import claude_auth, common, group_admin, group_events
 from bot.middleware.error_handler import ErrorHandlerMiddleware
 from bot.middleware.group_tracker import GroupTrackerMiddleware
 from bot.services.group_service import GroupService
@@ -101,9 +101,12 @@ async def main() -> None:
     dp["permission_service"] = permission_service
     dp["group_service"] = group_service
     dp["user_service"] = user_service
+    dp["database"] = database
+    dp["settings"] = settings
 
     # Register routers
     dp.include_router(common.router)
+    dp.include_router(claude_auth.router)
     dp.include_router(group_events.router)
     dp.include_router(group_admin.router)
 

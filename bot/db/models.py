@@ -1,8 +1,10 @@
 """SQLAlchemy database models."""
 
 from datetime import datetime
+from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, String, func
+from sqlalchemy import BigInteger, DateTime, Index, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -111,3 +113,118 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username='{self.username}', first_name='{self.first_name}')>"
+
+
+class ChatSession(Base):
+    """
+    Claude browser session for a chat.
+
+    Stores Playwright session information for each chat_id.
+    Allows automated interaction with Claude.ai.
+    """
+
+    __tablename__ = "chat_sessions"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        comment="Telegram chat_id (unique per session)",
+    )
+    email: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Email address associated with this Claude session",
+    )
+    session_path: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="File system path to Playwright session data",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        comment="When session was initialized",
+    )
+    last_used: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+        comment="Last time this session was used for /get_code",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatSession(chat_id={self.chat_id}, email='{self.email}')>"
+
+
+class Task(Base):
+    """
+    Background task queue entry.
+
+    Tasks are processed asynchronously by worker service.
+    Uses PostgreSQL row-level locking for safe concurrent processing.
+    """
+
+    __tablename__ = "tasks"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        comment="Unique task ID",
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        index=True,
+        comment="Telegram chat_id for this task",
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        comment="Telegram user_id who initiated task",
+    )
+    task_type: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Task type: 'init_session' or 'get_code'",
+    )
+    payload: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="Task-specific payload (email, url, etc.)",
+    )
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="pending",
+        comment="Task status: pending, processing, done, failed",
+    )
+    result: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Task result or error message",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        comment="When task was created",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="Last time task was updated",
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_tasks_pending_status",
+            "status",
+            postgresql_where=lambda: Task.status == "pending",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Task(id={self.id}, type='{self.task_type}', status='{self.status}')>"
