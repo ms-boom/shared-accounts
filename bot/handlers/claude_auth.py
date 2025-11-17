@@ -27,6 +27,19 @@ CLAUDE_AUTH_URL_PATTERN = re.compile(
 )
 
 
+def get_thread_id(message: Message) -> int:
+    """
+    Extract thread_id from message.
+
+    Args:
+        message: Telegram message
+
+    Returns:
+        thread_id (0 for main chat, >0 for topics)
+    """
+    return message.message_thread_id if message.message_thread_id else 0
+
+
 def validate_email(email: str) -> bool:
     """Validate email format."""
     return bool(EMAIL_REGEX.match(email))
@@ -103,8 +116,9 @@ async def init_session_handler(
         return
 
     # Check for existing session
+    thread_id = get_thread_id(message)
     session_repo = ChatSessionRepository(database)
-    existing_session = await session_repo.get_by_chat_id(message.chat.id)
+    existing_session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
     if existing_session:
         await message.reply(
@@ -127,6 +141,7 @@ async def init_session_handler(
         user_id=message.from_user.id,
         task_type="init_session",
         payload=payload,
+        thread_id=thread_id,
     )
 
     await message.reply(
@@ -134,7 +149,9 @@ async def init_session_handler(
         "Please wait for the authorization link request..."
     )
 
-    logger.info(f"Created init_session task {task['id']} for chat {message.chat.id}")
+    logger.info(
+        f"Created init_session task {task['id']} for chat {message.chat.id}/{thread_id}"
+    )
 
 
 @router.message(Command("get_code"))
@@ -153,8 +170,9 @@ async def get_code_handler(
         database: Database connection
     """
     # Check for existing session
+    thread_id = get_thread_id(message)
     session_repo = ChatSessionRepository(database)
-    session = await session_repo.get_by_chat_id(message.chat.id)
+    session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
     if not session:
         await message.reply(
@@ -199,11 +217,14 @@ async def get_code_handler(
         user_id=message.from_user.id,
         task_type="get_code",
         payload=payload,
+        thread_id=thread_id,
     )
 
     await message.reply("🔄 Extracting authorization code...")
 
-    logger.info(f"Created get_code task {task['id']} for chat {message.chat.id}")
+    logger.info(
+        f"Created get_code task {task['id']} for chat {message.chat.id}/{thread_id}"
+    )
 
 
 @router.message(Command("health"))
@@ -288,10 +309,13 @@ async def handle_claude_url(
         return
 
     login_url = message.text.strip()
+    thread_id = get_thread_id(message)
 
     # Check for pending init_session
     task_repo = TaskRepository(database)
-    recent_tasks = await task_repo.get_by_chat_id(message.chat.id, limit=5)
+    recent_tasks = await task_repo.get_by_chat_id(
+        message.chat.id, limit=5, thread_id=thread_id
+    )
 
     # Find recent init_session task that's processing
     init_task = None
@@ -323,10 +347,11 @@ async def handle_claude_url(
         user_id=message.from_user.id,
         task_type="process_login_link",
         payload=payload,
+        thread_id=thread_id,
     )
 
     await message.reply("🔄 Processing login link...")
 
     logger.info(
-        f"Created process_login_link task {task['id']} for chat {message.chat.id}"
+        f"Created process_login_link task {task['id']} for chat {message.chat.id}/{thread_id}"
     )

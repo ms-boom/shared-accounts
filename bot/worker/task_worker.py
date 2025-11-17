@@ -96,24 +96,25 @@ class TaskWorker:
         task_id: UUID = task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
         task_type = task["task_type"]
         chat_id = task["chat_id"]
+        thread_id = task.get("thread_id", 0)
         payload = task["payload"]
 
         logger.info(f"Processing task {task_id}: {task_type}")
 
         try:
             if task_type == "init_session":
-                await self.process_init_session(task_id, chat_id, payload)
+                await self.process_init_session(task_id, chat_id, thread_id, payload)
             elif task_type == "process_login_link":
-                await self.process_login_link(task_id, chat_id, payload)
+                await self.process_login_link(task_id, chat_id, thread_id, payload)
             elif task_type == "get_code":
-                await self.process_get_code(task_id, chat_id, payload)
+                await self.process_get_code(task_id, chat_id, thread_id, payload)
             else:
                 raise TaskError(f"Unknown task type: {task_type}")
 
         except (BrowserError, SessionError, TaskError) as e:
             logger.error(f"Task {task_id} failed: {e}")
             await self.task_repo.update_status(task_id, "failed", str(e))
-            await self.send_message(chat_id, str(e))
+            await self.send_message(chat_id, str(e), thread_id)
 
         except Exception as e:
             logger.error(
@@ -125,12 +126,14 @@ class TaskWorker:
             await self.send_message(
                 chat_id,
                 "❌ An unexpected error occurred. Please try again later.",
+                thread_id,
             )
 
     async def process_init_session(
         self,
         task_id: UUID,
         chat_id: int,
+        thread_id: int,
         payload: dict,
     ) -> None:
         """
@@ -139,6 +142,7 @@ class TaskWorker:
         Args:
             task_id: Task UUID
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id
             payload: Task payload with 'email' field
         """
         email = payload.get("email")
@@ -146,25 +150,29 @@ class TaskWorker:
             raise TaskError("Missing 'email' in payload")
 
         # Initialize session with Playwright
-        session_path, message = await self.playwright.initialize_session(chat_id, email)
+        session_path, message = await self.playwright.initialize_session(
+            chat_id, email, thread_id
+        )
 
         # Create session record in database
         await self.session_repo.upsert(
             chat_id=chat_id,
             email=email,
             session_path=session_path,
+            thread_id=thread_id,
         )
 
         # Mark task as done
         await self.task_repo.update_status(task_id, "done", message)
 
         # Send result to user
-        await self.send_message(chat_id, message)
+        await self.send_message(chat_id, message, thread_id)
 
     async def process_login_link(
         self,
         task_id: UUID,
         chat_id: int,
+        thread_id: int,
         payload: dict,
     ) -> None:
         """
@@ -173,6 +181,7 @@ class TaskWorker:
         Args:
             task_id: Task UUID
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id
             payload: Task payload with 'login_url' field
         """
         login_url = payload.get("login_url")
@@ -180,18 +189,21 @@ class TaskWorker:
             raise TaskError("Missing 'login_url' in payload")
 
         # Process login link
-        message = await self.playwright.process_login_link(chat_id, login_url)
+        message = await self.playwright.process_login_link(
+            chat_id, login_url, thread_id
+        )
 
         # Mark task as done
         await self.task_repo.update_status(task_id, "done", message)
 
         # Send result to user
-        await self.send_message(chat_id, message)
+        await self.send_message(chat_id, message, thread_id)
 
     async def process_get_code(
         self,
         task_id: UUID,
         chat_id: int,
+        thread_id: int,
         payload: dict,
     ) -> None:
         """
@@ -200,6 +212,7 @@ class TaskWorker:
         Args:
             task_id: Task UUID
             chat_id: Telegram chat_id
+            thread_id: Telegram thread_id
             payload: Task payload with 'auth_url' field
         """
         auth_url = payload.get("auth_url")
@@ -207,37 +220,50 @@ class TaskWorker:
             raise TaskError("Missing 'auth_url' in payload")
 
         # Extract authorization code
-        code = await self.playwright.extract_authorization_code(chat_id, auth_url)
+        code = await self.playwright.extract_authorization_code(
+            chat_id, auth_url, thread_id
+        )
 
         # Update last_used for session
-        await self.session_repo.update_last_used(chat_id)
+        await self.session_repo.update_last_used(chat_id, thread_id)
 
         # Mark task as done
         await self.task_repo.update_status(task_id, "done", code)
 
         # Send code to user
         message = f"✅ Authorization code: `{code}`"
-        await self.send_message(chat_id, message, parse_mode="Markdown")
+        await self.send_message(chat_id, message, thread_id, parse_mode="Markdown")
 
     async def send_message(
         self,
         chat_id: int,
         text: str,
+        thread_id: int = 0,
         parse_mode: str | None = None,
     ) -> None:
         """
-        Send message to Telegram chat.
+        Send message to Telegram chat or topic.
 
         Args:
             chat_id: Telegram chat_id
             text: Message text
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
             parse_mode: Parse mode (None, "Markdown", "HTML")
         """
         try:
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=parse_mode,
-            )
+            # If thread_id is 0, don't send message_thread_id parameter
+            if thread_id == 0:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=parse_mode,
+                )
+            else:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    message_thread_id=thread_id,
+                    parse_mode=parse_mode,
+                )
         except Exception as e:
-            logger.error(f"Failed to send message to {chat_id}: {e}")
+            logger.error(f"Failed to send message to {chat_id}/{thread_id}: {e}")

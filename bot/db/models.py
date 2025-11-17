@@ -117,10 +117,13 @@ class User(Base):
 
 class ChatSession(Base):
     """
-    Claude browser session for a chat.
+    Claude browser session for a chat or topic.
 
-    Stores Playwright session information for each chat_id.
+    Stores Playwright session information for each (chat_id, thread_id) pair.
     Allows automated interaction with Claude.ai.
+
+    thread_id = 0 means main chat (not a topic).
+    thread_id > 0 identifies a specific topic/thread in the chat.
     """
 
     __tablename__ = "chat_sessions"
@@ -128,7 +131,13 @@ class ChatSession(Base):
     chat_id: Mapped[int] = mapped_column(
         BigInteger,
         primary_key=True,
-        comment="Telegram chat_id (unique per session)",
+        comment="Telegram chat_id",
+    )
+    thread_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default="0",
+        comment="Telegram thread_id (0 for main chat, >0 for topics)",
     )
     email: Mapped[str] = mapped_column(
         Text,
@@ -153,7 +162,8 @@ class ChatSession(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ChatSession(chat_id={self.chat_id}, email='{self.email}')>"
+        thread_str = f", thread_id={self.thread_id}" if self.thread_id else ""
+        return f"<ChatSession(chat_id={self.chat_id}{thread_str}, email='{self.email}')>"
 
 
 class Task(Base):
@@ -177,6 +187,12 @@ class Task(Base):
         nullable=False,
         index=True,
         comment="Telegram chat_id for this task",
+    )
+    thread_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default="0",
+        comment="Telegram thread_id (0 for main chat, >0 for topics)",
     )
     user_id: Mapped[int] = mapped_column(
         BigInteger,
