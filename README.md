@@ -77,6 +77,84 @@ Telegram bot для автоматизации получения авториз
    python -m bot.worker
    ```
 
+## User Journey
+
+### 1. Инициализация сессии (первый раз для группы/чата)
+
+**Администратор группы:**
+
+1. Добавьте бота в вашу Telegram группу
+2. Выполните команду:
+   ```
+   /init_session user@example.com
+   ```
+
+3. Бот ответит:
+   ```
+   🔄 Initializing session for user@example.com.
+   Please wait for the authorization link request...
+   ```
+
+4. Через несколько секунд:
+   ```
+   📧 Email sent! Please send me the authorization link from your inbox.
+   ```
+
+5. **Откройте email** от Claude и скопируйте ссылку авторизации
+6. **Отправьте ссылку боту** (просто вставьте URL в чат)
+7. Бот автоматически определит ссылку и обработает её:
+   ```
+   🔄 Processing login link...
+   ```
+
+8. После успешной авторизации:
+   ```
+   ✅ Session initialized successfully!
+   You can now use /get_code to extract authorization codes.
+   ```
+
+### 2. Получение авторизационного кода (регулярное использование)
+
+**Любой участник группы:**
+
+1. Скопируйте URL авторизации из Claude Code:
+   ```
+   https://claude.ai/auth/authorize?client_id=...&redirect_uri=...
+   ```
+
+2. Выполните команду:
+   ```
+   /get_code https://claude.ai/auth/authorize?client_id=...
+   ```
+
+3. Бот ответит:
+   ```
+   🔄 Extracting authorization code...
+   ```
+
+4. Через ~5-10 секунд вы получите код:
+   ```
+   ✅ Authorization code: `ABC123XYZ789`
+   ```
+
+5. Скопируйте код (одним кликом) и вставьте в Claude Code
+
+### 3. Проверка статуса системы
+
+```
+/health
+```
+
+Ответ:
+```
+✅ Bot Status
+
+• Database: ✅ Connected
+• Active sessions: 3
+• Pending tasks: 1
+• Worker: Running
+```
+
 ## Project Structure
 
 ```
@@ -192,9 +270,50 @@ SESSION_DIR=/data/sessions
 ERROR_DIR=/data/errors
 ```
 
-## Architecture Patterns
+## Architecture
 
-### Worker Pattern + Task Queue
+### System Overview
+
+```
+┌─────────────────┐
+│  Telegram API   │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│   Bot Service   │ (aiogram)
+│  - /init_session│
+│  - /get_code    │
+│  - /health      │
+│  - Creates tasks│
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  PostgreSQL     │
+│  - tasks queue  │
+│  - chat_sessions│
+│  (FOR UPDATE    │
+│   SKIP LOCKED)  │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│ Worker Service  │ (1+ instances)
+│  - Dequeue tasks│
+│  - Playwright   │
+│  - Extract code │
+│  - Send results │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  File System    │
+│  /data/sessions/{chat_id}/
+│  /data/logs/bot.log
+│  /data/errors/{task_id}.png
+└─────────────────┘
+```
+
+### Architecture Patterns
+
+#### Worker Pattern + Task Queue
 The bot uses a PostgreSQL-based task queue with worker processes:
 
 ```
@@ -203,7 +322,7 @@ Bot (aiogram) → Tasks Table → Worker (Playwright)
 
 Tasks are processed with `SELECT FOR UPDATE SKIP LOCKED` for concurrent safety.
 
-### Repository Pattern
+#### Repository Pattern
 All database operations go through repositories:
 
 ```python
@@ -211,7 +330,7 @@ session_repo = ChatSessionRepository(database)
 session = await session_repo.get_by_chat_id(chat_id, thread_id)
 ```
 
-### Session Isolation
+#### Session Isolation
 Each (chat_id, thread_id) pair gets an isolated Playwright browser context:
 
 ```
@@ -222,7 +341,7 @@ Each (chat_id, thread_id) pair gets an isolated Playwright browser context:
     └── state.json
 ```
 
-### Topics Support
+#### Topics Support
 All handlers extract thread_id automatically:
 
 ```python
@@ -232,27 +351,50 @@ def get_thread_id(message: Message) -> int:
 
 thread_id = 0 means main chat, >0 means topic.
 
+## Database Schema
+
+### Tables
+
+**`chat_sessions`** - хранит Playwright сессии для каждого чата
+- `chat_id` (PK) - Telegram chat_id
+- `thread_id` (PK) - Telegram message_thread_id (0 = main chat)
+- `email` - email адрес Claude аккаунта
+- `session_path` - путь к данным сессии Playwright
+- `created_at` - когда сессия создана
+- `last_used` - последнее использование
+
+**`tasks`** - очередь фоновых задач
+- `id` (UUID PK) - уникальный ID задачи
+- `chat_id` - Telegram chat_id
+- `thread_id` - Telegram message_thread_id
+- `user_id` - Telegram user_id инициатора
+- `task_type` - тип задачи: `init_session`, `process_login_link`, `get_code`
+- `payload` (JSONB) - данные задачи
+- `status` - статус: `pending`, `processing`, `done`, `failed`
+- `result` - результат или сообщение об ошибке
+- `created_at`, `updated_at`
+
+### Migrations
+
+```bash
+# Apply migrations
+task db:upgrade
+# or: alembic upgrade head
+
+# Create new migration
+task db:revision -- -m "description"
+# or: alembic revision --autogenerate -m "description"
+
+# Rollback migration
+task db:downgrade
+# or: alembic downgrade -1
+
+# Show current version
+task db:current
+# or: alembic current
+```
+
 ## How It Works
-
-### User Journey
-
-1. **Initialize Session**
-   - User: `/init_session user@example.com` (in chat or topic)
-   - Bot: Creates task, worker opens claude.ai, fills email
-   - Worker: Sends "Check your email" screenshot
-   - User receives: "Email sent! Please send the authorization link"
-
-2. **Process Login Link**
-   - User: Forwards Claude login link from email
-   - Bot: Detects URL, creates process_login_link task
-   - Worker: Opens link, waits for authentication
-   - User receives: "Session initialized successfully!"
-
-3. **Extract Authorization Code**
-   - User: `/get_code https://claude.ai/auth/authorize?...`
-   - Bot: Creates get_code task
-   - Worker: Opens URL, extracts code from page
-   - User receives: "Authorization code: ABC123XYZ"
 
 ### Adding New Task Types
 
@@ -278,11 +420,74 @@ thread_id = 0 means main chat, >0 means topic.
 
 ## Development Workflow
 
+### Local Development Without Docker
+
+1. **Install dependencies**
+   ```bash
+   uv sync --group dev
+   ```
+
+2. **Install Playwright browsers**
+   ```bash
+   uv run playwright install chromium
+   ```
+
+3. **Start PostgreSQL**
+   ```bash
+   docker run -d \
+     -p 5432:5432 \
+     -e POSTGRES_DB=claude_bot \
+     -e POSTGRES_USER=postgres \
+     -e POSTGRES_PASSWORD=postgres \
+     postgres:15-alpine
+   ```
+
+4. **Apply migrations**
+   ```bash
+   uv run alembic upgrade head
+   ```
+
+5. **Run bot and worker in separate terminals**
+   ```bash
+   # Terminal 1: Bot
+   uv run python -m bot
+
+   # Terminal 2: Worker
+   uv run python -m bot.worker
+   ```
+
+### Code Quality Workflow
+
 1. **Make changes** to your code
 2. **Format code**: `task format`
 3. **Check quality**: `task lint`
 4. **Run tests**: `task test`
 5. **Commit**: Git hooks will run automatically if installed
+
+```bash
+# Format code
+task format
+# or: uv run ruff format bot tests
+
+# Check linting
+task lint:ruff
+# or: uv run ruff check --fix bot tests
+
+# Type checking
+task lint:mypy
+# or: uv run mypy bot
+
+# Run all linters
+task lint
+
+# Run tests
+task test
+# or: uv run pytest
+
+# Run tests with coverage
+task coverage
+# or: uv run pytest --cov=bot
+```
 
 ## Testing
 
@@ -295,7 +500,62 @@ task coverage
 
 # Run specific tests
 pytest tests/unit/test_services.py
+
+# Run only unit tests
+task test:unit
 ```
+
+## Troubleshooting
+
+### Бот не отвечает
+
+1. Проверьте логи:
+   ```bash
+   docker-compose logs -f bot worker
+   ```
+
+2. Проверьте статус сервисов:
+   ```bash
+   docker-compose ps
+   ```
+
+3. Проверьте подключение к БД:
+   ```bash
+   docker-compose exec postgres psql -U postgres -d claude_bot -c "SELECT 1"
+   ```
+
+### Worker не обрабатывает задачи
+
+1. Проверьте что Playwright установлен:
+   ```bash
+   docker-compose exec worker playwright --version
+   ```
+
+2. Проверьте очередь задач:
+   ```bash
+   docker-compose exec postgres psql -U postgres -d claude_bot -c \
+     "SELECT id, task_type, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 10"
+   ```
+
+3. Перезапустите worker:
+   ```bash
+   docker-compose restart worker
+   ```
+
+### Сессия устарела / невалидна
+
+Если получаете ошибку "Session expired or invalid":
+
+1. Удалите старую сессию:
+   ```bash
+   docker-compose exec postgres psql -U postgres -d claude_bot -c \
+     "DELETE FROM chat_sessions WHERE chat_id = YOUR_CHAT_ID"
+   ```
+
+2. Переинициализируйте сессию:
+   ```
+   /init_session user@example.com
+   ```
 
 ## Production Deployment
 
@@ -350,12 +610,34 @@ Services:
    python -m bot.worker
    ```
 
-### Scaling
+### Production Best Practices
 
-Run multiple worker instances for better throughput:
-```bash
-docker-compose up -d --scale worker=3
-```
+1. **Используйте внешний PostgreSQL**:
+   ```env
+   DATABASE_URL=postgresql+asyncpg://user:password@prod-db-host:5432/claude_bot
+   ```
+
+2. **Настройте логирование**:
+   ```env
+   LOG_LEVEL=WARNING
+   LOG_DIR=/var/log/claude-bot
+   ```
+
+3. **Используйте secrets manager** для TELEGRAM_TOKEN
+
+4. **Настройте мониторинг** через `/health` endpoint
+
+5. **Настройте backup БД** и volumes:
+   ```bash
+   docker volume ls
+   docker run --rm -v shared-accounts_bot_data:/data -v $(pwd):/backup \
+     ubuntu tar czf /backup/bot-data-$(date +%Y%m%d).tar.gz /data
+   ```
+
+6. **Масштабируйте workers** при необходимости:
+   ```bash
+   docker-compose up -d --scale worker=3
+   ```
 
 Workers use PostgreSQL locking (`FOR UPDATE SKIP LOCKED`), so multiple instances can safely process tasks concurrently.
 
@@ -365,6 +647,11 @@ Workers use PostgreSQL locking (`FOR UPDATE SKIP LOCKED`), so multiple instances
 - **mypy**: Static type checking
 - **prek**: Pre-commit hooks management
 - **pytest**: Testing framework
+
+Configuration in `pyproject.toml`:
+- `[tool.ruff]` - Ruff linter and formatter settings
+- `[tool.mypy]` - Type checking configuration
+- `[tool.pytest.ini_options]` - Test framework settings
 
 ## Principles
 
@@ -376,6 +663,9 @@ This project follows "Functional Clarity" principles:
 - **Type Safety**: Full type hints with mypy strict mode
 - **Testability**: Pure functions, explicit inputs/outputs, isolated side effects
 - **Modern Python**: 3.12+, async/await, pathlib, context managers
+- **Domain-Oriented**: Code organized by functional areas, not technical layers
+- **Explicit State Management**: Clear state transitions, context-dependent operations
+- **Infrastructure Separation**: Business logic isolated from implementation details
 
 See [CLAUDE.md](CLAUDE.md) for full project documentation including:
 - Complete architecture overview
