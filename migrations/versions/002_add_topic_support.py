@@ -21,7 +21,6 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Add thread_id support for Telegram topics."""
     # Add thread_id to chat_sessions table
-    # First add the column
     op.add_column(
         "chat_sessions",
         sa.Column(

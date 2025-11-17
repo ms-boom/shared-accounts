@@ -20,10 +20,10 @@ class Settings(BaseSettings):
         description="Bot token from @BotFather",
     )
 
-    # Database Configuration
+    # Database Configuration (PostgreSQL only)
     DATABASE_URL: str = Field(
-        default="sqlite+aiosqlite:///./bot.db",
-        description="Database connection URL",
+        default="postgresql+asyncpg://user:password@localhost/claude_bot",
+        description="PostgreSQL database connection URL",
     )
 
     # Logging Configuration
@@ -40,16 +40,6 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(
         default=False,
         description="Enable debug mode",
-    )
-
-    # FSM Storage Configuration
-    FSM_STORAGE_TYPE: str = Field(
-        default="memory",
-        description="FSM storage type: 'memory' or 'redis'",
-    )
-    REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL (used if FSM_STORAGE_TYPE=redis)",
     )
 
     # Permission Cache Settings
@@ -123,18 +113,6 @@ class Settings(BaseSettings):
         if value_upper not in valid_levels:
             raise ValueError(f"LOG_LEVEL must be one of {valid_levels}, got '{value}'")
         return value_upper
-
-    @field_validator("FSM_STORAGE_TYPE")
-    @classmethod
-    def validate_fsm_storage_type(cls, value: str) -> str:
-        """Validate that FSM storage type is valid."""
-        valid_types = {"memory", "redis"}
-        value_lower = value.lower()
-        if value_lower not in valid_types:
-            raise ValueError(
-                f"FSM_STORAGE_TYPE must be one of {valid_types}, got '{value}'"
-            )
-        return value_lower
 
 
 def get_settings() -> Settings:

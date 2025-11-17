@@ -246,3 +246,52 @@ class Task(Base):
 
     def __repr__(self) -> str:
         return f"<Task(id={self.id}, type='{self.task_type}', status='{self.status}')>"
+
+
+class FSMState(Base):
+    """
+    Finite State Machine state storage for aiogram.
+
+    Stores user/chat states and associated data for FSM workflows.
+    Provides persistent storage for conversation states across bot restarts.
+    """
+
+    __tablename__ = "fsm_states"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        comment="Telegram chat_id",
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        comment="Telegram user_id",
+    )
+    thread_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default="0",
+        comment="Telegram thread_id (0 for main chat, >0 for topics)",
+    )
+    state: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Current FSM state (None if no active state)",
+    )
+    data: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="{}",
+        comment="State data storage (JSON)",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="Last time state was updated",
+    )
+
+    def __repr__(self) -> str:
+        return f"<FSMState(chat_id={self.chat_id}, user_id={self.user_id}, state='{self.state}')>"
