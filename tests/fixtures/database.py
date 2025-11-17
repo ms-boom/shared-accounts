@@ -46,13 +46,23 @@ def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
 
     This fixture provides configuration for the test database.
     Uses default postgres database to avoid conflicts.
+
+    DATABASE_URL can be overridden via environment variable for CI/CD.
     """
+    import os
+
     # Create temp directories for test data
     temp_dir = tmp_path_factory.mktemp("test_data")
 
+    # Use environment variable if set (for CI/CD), otherwise use default
+    database_url = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/claude_bot_test",
+    )
+
     settings = Settings(
         TELEGRAM_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-        DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/claude_bot_test",
+        DATABASE_URL=database_url,
         LOG_LEVEL="DEBUG",
         DEBUG=True,
         DATA_DIR=temp_dir / "data",
