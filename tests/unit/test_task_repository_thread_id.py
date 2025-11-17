@@ -18,19 +18,17 @@ class TestTaskRepositoryThreadId:
         self, task_repo: TaskRepository
     ) -> None:
         """Test creating task with default thread_id (main chat)."""
-        chat_id = 123456
-        user_id = 789
-
         # SQLite doesn't support JSONB, so we skip actual task creation
         # Just verify the method signature accepts thread_id
         # For full testing, use PostgreSQL integration tests
 
         # This test verifies the API exists with correct parameters
-        assert hasattr(task_repo, 'create')
+        assert hasattr(task_repo, "create")
         import inspect
+
         sig = inspect.signature(task_repo.create)
-        assert 'thread_id' in sig.parameters
-        assert sig.parameters['thread_id'].default == 0
+        assert "thread_id" in sig.parameters
+        assert sig.parameters["thread_id"].default == 0
 
     async def test_create_task_with_topic_thread_id(
         self, task_repo: TaskRepository
@@ -38,17 +36,18 @@ class TestTaskRepositoryThreadId:
         """Test creating task for specific topic."""
         # This test verifies the method signature
         import inspect
+
         sig = inspect.signature(task_repo.create)
 
         # Verify thread_id parameter exists with default value
-        assert 'thread_id' in sig.parameters
-        assert sig.parameters['thread_id'].default == 0
+        assert "thread_id" in sig.parameters
+        assert sig.parameters["thread_id"].default == 0
 
         # Verify all required parameters exist
-        assert 'chat_id' in sig.parameters
-        assert 'user_id' in sig.parameters
-        assert 'task_type' in sig.parameters
-        assert 'payload' in sig.parameters
+        assert "chat_id" in sig.parameters
+        assert "user_id" in sig.parameters
+        assert "task_type" in sig.parameters
+        assert "payload" in sig.parameters
 
     async def test_get_by_chat_id_filters_by_thread_id(
         self, task_repo: TaskRepository
@@ -56,14 +55,15 @@ class TestTaskRepositoryThreadId:
         """Test get_by_chat_id can filter by thread_id."""
         # Verify method signature includes thread_id parameter
         import inspect
+
         sig = inspect.signature(task_repo.get_by_chat_id)
 
-        assert 'chat_id' in sig.parameters
-        assert 'limit' in sig.parameters
-        assert 'thread_id' in sig.parameters
+        assert "chat_id" in sig.parameters
+        assert "limit" in sig.parameters
+        assert "thread_id" in sig.parameters
 
         # thread_id should be optional (None means all threads)
-        assert sig.parameters['thread_id'].default is None
+        assert sig.parameters["thread_id"].default is None
 
     async def test_get_by_chat_id_without_thread_filter(
         self, task_repo: TaskRepository
@@ -104,9 +104,7 @@ class TestTaskRepositoryThreadIdIntegration:
         """Create TaskRepository instance for testing."""
         return TaskRepository(test_database)
 
-    async def test_tasks_isolated_by_thread_id(
-        self, task_repo: TaskRepository
-    ) -> None:
+    async def test_tasks_isolated_by_thread_id(self, task_repo: TaskRepository) -> None:
         """Test that tasks with different thread_id are independent."""
         chat_id = 123456
         user_id = 789
@@ -157,9 +155,7 @@ class TestTaskRepositoryThreadIdIntegration:
         all_tasks = await task_repo.get_by_chat_id(chat_id, limit=10)
         assert len(all_tasks) == 3
 
-    async def test_get_by_id_returns_thread_id(
-        self, task_repo: TaskRepository
-    ) -> None:
+    async def test_get_by_id_returns_thread_id(self, task_repo: TaskRepository) -> None:
         """Test that get_by_id returns thread_id field."""
         chat_id = 123456
         thread_id = 555
