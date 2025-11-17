@@ -1,140 +1,88 @@
-"""Database connection and session management."""
+"""Database configuration and session management.
+
+Pattern from statements/ project - global Session with proper configuration.
+
+Usage in production code:
+    async with db.Session() as session, session.begin():
+        result = await session.execute(sa.select(Model).where(...))
+        records = result.scalars().all()
+
+Usage in repositories (session injection):
+    class SomeRepository:
+        def __init__(self, session: AsyncSession):
+            self.session = session
+
+        async def create(self, data):
+            self.session.add(Model(**data))
+            await self.session.flush()  # No commit in repository!
+"""
 
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 
-from databases import Database as DatabasesDatabase
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+import sqlalchemy as sa
+import sqlalchemy.ext.asyncio
+import sqlalchemy.orm
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from bot.core.config import Settings
-from bot.core.exceptions import DatabaseError
-from bot.db.models import Base
 
 logger = logging.getLogger(__name__)
 
+# Global Session factory - configured once, reused everywhere
+# Pattern from statements/db.py
+Session = sa.orm.sessionmaker(
+    expire_on_commit=False,  # Prevent attributes from being expired after commit
+    class_=sa.ext.asyncio.AsyncSession,
+)
 
-class Database:
+
+async def setup(settings: Settings) -> AsyncEngine:
+    """Initialize database engine and configure global Session.
+
+    This should be called once at application startup.
+    Pattern from statements/db.py with simplified pool settings.
+
+    Args:
+        settings: Application settings
+
+    Returns:
+        Configured AsyncEngine
     """
-    Database connection manager.
+    if (bind := Session.kw.get("bind")) is not None:
+        logger.info("Database has already been initialized. Reusing existing engine.")
+        return bind
 
-    Handles database initialization, connection lifecycle, and session management.
-    """
+    # Pattern from statements - use CConnection and disable statement caching
+    from bot.db.dialect import CConnection
 
-    def __init__(self, settings: Settings):
-        """
-        Initialize database manager.
+    connect_args = {
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+        "connection_class": CConnection,
+    }
 
-        Args:
-            settings: Application settings containing database URL
-        """
-        self.settings = settings
-        self.database_url = settings.DATABASE_URL
-        self.engine: AsyncEngine | None = None
-        self.database: DatabasesDatabase | None = None
-        self.session_maker: async_sessionmaker[AsyncSession] | None = None
+    # Create engine with connection pooling
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,  # Set to True for SQL debugging
+        pool_size=5,  # Number of connections to keep in pool
+        max_overflow=10,  # Maximum overflow connections
+        pool_timeout=30,  # Seconds to wait for connection from pool
+        pool_recycle=3600,  # Recycle connections after 1 hour
+        pool_pre_ping=False,  # Match statements settings
+        connect_args=connect_args,
+    )
 
-    async def startup(self) -> None:
-        """
-        Initialize database connection.
+    # Configure global Session with engine
+    Session.configure(bind=engine)
+    logger.info("Database initialized with connection pool (size=5, max_overflow=10)")
 
-        Creates engine and connects to database.
-        Should be called on application startup.
+    return engine
 
-        Raises:
-            DatabaseError: If connection fails
-        """
-        try:
-            # Create SQLAlchemy async engine
-            self.engine = create_async_engine(
-                self.database_url,
-                echo=self.settings.DEBUG,
-                future=True,
-            )
 
-            # Create session maker for SQLAlchemy ORM operations
-            self.session_maker = async_sessionmaker(
-                self.engine,
-                class_=AsyncSession,
-                expire_on_commit=False,
-            )
-
-            # Create databases instance for async queries
-            self.database = DatabasesDatabase(self.database_url)
-            await self.database.connect()
-
-            logger.info(f"Database connected: {self.database_url}")
-        except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
-            raise DatabaseError(f"Database connection failed: {e}") from e
-
-    async def shutdown(self) -> None:
-        """
-        Close database connection.
-
-        Should be called on application shutdown.
-        """
-        if self.database:
-            await self.database.disconnect()
-            logger.info("Database disconnected")
-
-        if self.engine:
-            await self.engine.dispose()
-
-    async def create_tables(self) -> None:
-        """
-        Create all database tables.
-
-        WARNING: This drops existing tables! Use migrations in production.
-        Only use for development/testing.
-        """
-        if not self.engine:
-            raise DatabaseError(
-                "Database engine not initialized. Call startup() first."
-            )
-
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
-
-        logger.info("Database tables created")
-
-    @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[DatabasesDatabase]:
-        """
-        Create a database transaction context.
-
-        Usage:
-            async with database.transaction() as tx:
-                await tx.execute(query)
-
-        Yields:
-            Database transaction object
-
-        Raises:
-            DatabaseError: If transaction fails
-        """
-        if not self.database:
-            raise DatabaseError("Database not initialized. Call startup() first.")
-
-        async with self.database.transaction():
-            yield self.database
-
-    def get_connection(self) -> DatabasesDatabase:
-        """
-        Get database connection.
-
-        Returns:
-            Database connection instance
-
-        Raises:
-            DatabaseError: If database not initialized
-        """
-        if not self.database:
-            raise DatabaseError("Database not initialized. Call startup() first.")
-        return self.database
+async def dispose():
+    """Dispose database engine and cleanup resources."""
+    if (bind := Session.kw.get("bind")) is not None:
+        await bind.dispose()
+        Session.configure(bind=None)
+        logger.info("Database engine disposed")

@@ -3,6 +3,7 @@
 import pytest
 
 from bot.db.repositories.task_repository import TaskRepository
+from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -10,9 +11,9 @@ class TestTaskRepositoryThreadId:
     """Tests for TaskRepository thread_id functionality."""
 
     @pytest.fixture
-    def task_repo(self, test_database):
+    def task_repo(self, test_database_adapter: DatabasesAdapter):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database)
+        return TaskRepository(test_database_adapter)
 
     async def test_create_task_with_default_thread_id(
         self, task_repo: TaskRepository
@@ -100,9 +101,9 @@ class TestTaskRepositoryThreadIdIntegration:
     """
 
     @pytest.fixture
-    def task_repo(self, test_database):
+    def task_repo(self, test_database_adapter: DatabasesAdapter):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database)
+        return TaskRepository(test_database_adapter)
 
     async def test_tasks_isolated_by_thread_id(self, task_repo: TaskRepository) -> None:
         """Test that tasks with different thread_id are independent."""

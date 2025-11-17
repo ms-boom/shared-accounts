@@ -1,10 +1,10 @@
 """Unit tests for bot/db/repositories/user_repository.py."""
 
 import pytest
-from databases import Database
 
 from bot.core.exceptions import UserNotFoundError
 from bot.db.repositories.user_repository import UserRepository
+from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -12,21 +12,21 @@ class TestUserRepository:
     """Tests for UserRepository class."""
 
     @pytest.fixture
-    def user_repository(self, test_database: Database) -> UserRepository:
+    def user_repository(
+        self, test_database_adapter: DatabasesAdapter
+    ) -> UserRepository:
         """
         Create UserRepository instance for testing.
 
         Args:
-            test_database: Test database fixture
+            test_database_adapter: Test database adapter using db_session
 
         Returns:
             UserRepository instance
         """
-        return UserRepository(test_database)
+        return UserRepository(test_database_adapter)
 
-    async def test_creates_user(
-        self, user_repository: UserRepository, test_database: Database
-    ) -> None:
+    async def test_creates_user(self, user_repository: UserRepository) -> None:
         """Test creating a new user."""
         user_id = 123456789
         username = "testuser"
