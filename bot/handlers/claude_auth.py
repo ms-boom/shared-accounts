@@ -62,6 +62,9 @@ async def init_session_handler(
     # Check if user is admin (for groups)
     if message.chat.type in ["group", "supergroup"]:
         # Check admin status
+        if not message.bot or not message.from_user:
+            await message.reply("❌ Unable to verify permissions.")
+            return
         try:
             chat_member = await message.bot.get_chat_member(
                 message.chat.id, message.from_user.id
@@ -112,6 +115,10 @@ async def init_session_handler(
         return
 
     # Create task
+    if not message.from_user:
+        await message.reply("❌ Unable to identify user.")
+        return
+
     task_repo = TaskRepository(database)
     payload = {"email": email}
 
@@ -180,6 +187,10 @@ async def get_code_handler(
         return
 
     # Create task
+    if not message.from_user:
+        await message.reply("❌ Unable to identify user.")
+        return
+
     task_repo = TaskRepository(database)
     payload = {"auth_url": auth_url}
 
@@ -221,6 +232,7 @@ async def health_handler(
 
         # Get active sessions count
         session_repo = ChatSessionRepository(database)
+        sessions_count: int | str
         try:
             sessions = await session_repo.get_all_active()
             sessions_count = len(sessions)
@@ -230,6 +242,7 @@ async def health_handler(
 
         # Get pending tasks count
         task_repo = TaskRepository(database)
+        pending_count: int | str
         try:
             pending_count = await task_repo.get_pending_count()
         except Exception as e:
@@ -299,6 +312,10 @@ async def handle_claude_url(
         return
 
     # Create task to process login link
+    if not message.from_user:
+        await message.reply("❌ Unable to identify user.")
+        return
+
     payload = {"login_url": login_url}
 
     task = await task_repo.create(

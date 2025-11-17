@@ -84,6 +84,8 @@ class PlaywrightService:
 
         try:
             # Create isolated browser context
+            if self.browser is None:
+                raise BrowserError("Browser not initialized. Call start() first.")
             context = await self.browser.new_context(
                 storage_state=None,
                 viewport={"width": 1280, "height": 720},
@@ -167,6 +169,8 @@ class PlaywrightService:
 
         try:
             # Load existing session
+            if self.browser is None:
+                raise BrowserError("Browser not initialized. Call start() first.")
             state_file = session_path / "state.json"
             context = await self.browser.new_context(
                 storage_state=str(state_file) if state_file.exists() else None,
@@ -239,6 +243,8 @@ class PlaywrightService:
 
         try:
             # Load authenticated session
+            if self.browser is None:
+                raise BrowserError("Browser not initialized. Call start() first.")
             context = await self.browser.new_context(
                 storage_state=str(state_file),
             )

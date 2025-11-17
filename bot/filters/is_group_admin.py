@@ -40,6 +40,9 @@ class IsGroupAdmin(Filter):
             return False
 
         bot = message.bot
+        if not bot:
+            return False
+
         return await permission_service.is_group_admin(
             bot=bot,
             user_id=message.from_user.id,
