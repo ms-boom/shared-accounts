@@ -7,7 +7,6 @@ IMPORTANT: Modular fixtures are loaded in specific order to ensure
 proper initialization of session-scoped async resources.
 """
 
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -15,7 +14,8 @@ from uuid import uuid4
 
 import pytest
 from aiogram import Bot
-from aiogram.types import Chat, ChatMember, User
+from aiogram.types import Chat, ChatMemberAdministrator, ChatMemberMember, User
+from aiogram.types.chat_member_administrator import ChatMemberStatus
 
 # Configure asyncio mode for pytest-asyncio
 # IMPORTANT: environment must be first to load event_loop fixture before async fixtures
