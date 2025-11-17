@@ -245,3 +245,18 @@ async def test_database(test_settings: Settings) -> AsyncGenerator[Database, Non
     yield database
 
     await database.disconnect()
+
+
+@pytest.fixture
+def test_database_adapter(db_session: AsyncSession):
+    """databases.Database-compatible adapter using db_session.
+
+    This fixture provides a databases.Database-compatible interface
+    while using SQLAlchemy AsyncSession for better transaction isolation.
+
+    Recommended for migrating tests from test_database to db_session
+    without modifying repository code.
+    """
+    from tests.adapters import DatabasesAdapter
+
+    return DatabasesAdapter(db_session)

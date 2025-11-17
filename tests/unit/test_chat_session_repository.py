@@ -3,6 +3,7 @@
 import pytest
 
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
+from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -10,9 +11,9 @@ class TestChatSessionRepository:
     """Tests for ChatSessionRepository."""
 
     @pytest.fixture
-    def chat_session_repo(self, test_database):
+    def chat_session_repo(self, test_database_adapter: DatabasesAdapter):
         """Create ChatSessionRepository instance for testing."""
-        return ChatSessionRepository(test_database)
+        return ChatSessionRepository(test_database_adapter)
 
     async def test_create_session_with_default_thread_id(
         self, chat_session_repo: ChatSessionRepository
