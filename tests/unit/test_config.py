@@ -114,9 +114,12 @@ class TestSettings:
     def test_default_values(self) -> None:
         """Test that default values are set correctly."""
         os.environ["TELEGRAM_TOKEN"] = "123456:test"
+        # Remove DATABASE_URL from environment to use default
+        os.environ.pop("DATABASE_URL", None)
 
         settings = Settings(TELEGRAM_TOKEN="123456:test")
 
+        # Check DATABASE_URL default value
         assert (
             settings.DATABASE_URL
             == "postgresql+asyncpg://user:password@localhost/claude_bot"
