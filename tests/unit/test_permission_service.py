@@ -1,10 +1,9 @@
 """Unit tests for bot/services/permission_service.py."""
 
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-from aiogram import Bot
 from aiogram.types import ChatMember, User
 
 from bot.core.config import Settings

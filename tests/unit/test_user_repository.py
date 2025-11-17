@@ -3,7 +3,7 @@
 import pytest
 from databases import Database
 
-from bot.core.exceptions import DatabaseError, UserNotFoundError
+from bot.core.exceptions import UserNotFoundError
 from bot.db.repositories.user_repository import UserRepository
 
 
@@ -207,13 +207,11 @@ class TestUserRepository:
         user_id = 123456789
 
         # Create user
-        original = await user_repository.create(
+        await user_repository.create(
             user_id=user_id,
             username="testuser",
             first_name="Test",
         )
-
-        original_updated_at = original["updated_at"]
 
         # Small delay to ensure timestamp difference
         import asyncio

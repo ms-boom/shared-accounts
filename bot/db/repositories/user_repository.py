@@ -151,7 +151,7 @@ class UserRepository:
         updates.append("updated_at = :updated_at")
         query = f"""
             UPDATE users
-            SET {', '.join(updates)}
+            SET {", ".join(updates)}
             WHERE id = :user_id
             RETURNING id, username, first_name, last_name, language_code, created_at, updated_at
         """
