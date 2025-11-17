@@ -1,5 +1,6 @@
 """PostgreSQL-based FSM storage for aiogram."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from aiogram.fsm.state import State
@@ -82,7 +83,7 @@ class PostgreSQLStorage(BaseStorage):
             row = result.scalar_one_or_none()
             return row
 
-    async def set_data(self, key: StorageKey, data: dict[str, Any]) -> None:
+    async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
         """
         Set data for user in chat.
 
@@ -90,6 +91,7 @@ class PostgreSQLStorage(BaseStorage):
             key: Storage key (bot_id, chat_id, user_id, thread_id)
             data: Data to store
         """
+        data_dict = dict(data)  # Convert Mapping to dict for JSONB storage
         async with self.session_maker() as session:
             stmt = (
                 insert(FSMState)
@@ -97,11 +99,11 @@ class PostgreSQLStorage(BaseStorage):
                     chat_id=key.chat_id,
                     user_id=key.user_id,
                     thread_id=key.thread_id or 0,
-                    data=data,
+                    data=data_dict,
                 )
                 .on_conflict_do_update(
                     index_elements=["chat_id", "user_id", "thread_id"],
-                    set_={"data": data},
+                    set_={"data": data_dict},
                 )
             )
             await session.execute(stmt)
@@ -128,7 +130,7 @@ class PostgreSQLStorage(BaseStorage):
             return row if row is not None else {}
 
     async def update_data(
-        self, key: StorageKey, data: dict[str, Any]
+        self, key: StorageKey, data: Mapping[str, Any]
     ) -> dict[str, Any]:
         """
         Update data for user in chat (merge with existing).
@@ -142,19 +144,19 @@ class PostgreSQLStorage(BaseStorage):
         """
         async with self.session_maker() as session:
             # Get existing data
-            stmt = select(FSMState.data).where(
+            select_stmt = select(FSMState.data).where(
                 FSMState.chat_id == key.chat_id,
                 FSMState.user_id == key.user_id,
                 FSMState.thread_id == (key.thread_id or 0),
             )
-            result = await session.execute(stmt)
+            result = await session.execute(select_stmt)
             existing_data = result.scalar_one_or_none() or {}
 
             # Merge with new data
             updated_data = {**existing_data, **data}
 
             # Update in database
-            stmt = (
+            insert_stmt = (
                 insert(FSMState)
                 .values(
                     chat_id=key.chat_id,
@@ -167,7 +169,7 @@ class PostgreSQLStorage(BaseStorage):
                     set_={"data": updated_data},
                 )
             )
-            await session.execute(stmt)
+            await session.execute(insert_stmt)
             await session.commit()
 
             return updated_data

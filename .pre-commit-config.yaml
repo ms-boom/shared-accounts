@@ -18,11 +18,21 @@ repos:
       - id: ruff-format
         args: [--config=pyproject.toml]
 
-  # Note: Mypy is excluded from pre-commit hooks for performance reasons
-  # Run it manually with: task lint:mypy
-  # Or add it here if you prefer:
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.13.0
-  #   hooks:
-  #     - id: mypy
-  #       additional_dependencies: [types-all]
+  # Mypy (type checking)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - pydantic>=2.10
+          - pydantic-settings>=2.0
+          - sqlalchemy>=2.0
+          - aiogram>=3.13
+          - databases>=0.9
+          - asyncpg>=0.30
+          - alembic>=1.14
+          - pytest>=7.4
+          - pytest-asyncio>=0.21
+          - playwright>=1.40
+          - punq>=0.7

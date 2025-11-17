@@ -276,6 +276,7 @@ class PostgreSQLStorage(BaseStorage):
 - `check-merge-conflict` — проверка merge conflicts
 - `ruff` — автоматический fix проблем кода
 - `ruff-format` — форматирование кода
+- `mypy` — статическая проверка типов
 
 **Установка:**
 ```bash
@@ -286,8 +287,6 @@ task prek:install
 ```bash
 task prek
 ```
-
-**Примечание:** `mypy` намеренно **исключен** из pre-commit hooks для производительности. Запускается вручную через `task lint:mypy`.
 
 ### 2. Ruff (Linter + Formatter)
 

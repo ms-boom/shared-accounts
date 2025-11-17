@@ -89,53 +89,16 @@ class TestSettings:
             )
             assert settings.LOG_LEVEL == level
 
-    def test_validates_fsm_storage_type(self) -> None:
-        """Test that invalid FSM_STORAGE_TYPE raises validation error."""
-        os.environ["TELEGRAM_TOKEN"] = "123456:test"
-
-        with pytest.raises(ValidationError) as exc_info:
-            Settings(
-                TELEGRAM_TOKEN="123456:test",
-                FSM_STORAGE_TYPE="invalid",
-            )
-
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        assert "FSM_STORAGE_TYPE must be one of" in str(errors[0]["ctx"]["error"])
-
-    def test_converts_fsm_storage_type_to_lowercase(self) -> None:
-        """Test that FSM_STORAGE_TYPE is converted to lowercase."""
-        os.environ["TELEGRAM_TOKEN"] = "123456:test"
-
-        settings = Settings(
-            TELEGRAM_TOKEN="123456:test",
-            FSM_STORAGE_TYPE="MEMORY",
-        )
-
-        assert settings.FSM_STORAGE_TYPE == "memory"
-
-    def test_accepts_valid_fsm_storage_types(self) -> None:
-        """Test that valid FSM storage types are accepted."""
-        os.environ["TELEGRAM_TOKEN"] = "123456:test"
-        valid_types = ["memory", "redis"]
-
-        for storage_type in valid_types:
-            settings = Settings(
-                TELEGRAM_TOKEN="123456:test",
-                FSM_STORAGE_TYPE=storage_type,
-            )
-            assert settings.FSM_STORAGE_TYPE == storage_type
-
     def test_converts_string_paths_to_path_objects(self) -> None:
         """Test that string paths are converted to Path objects."""
         os.environ["TELEGRAM_TOKEN"] = "123456:test"
 
         settings = Settings(
             TELEGRAM_TOKEN="123456:test",
-            DATA_DIR="/tmp/data",
-            SESSION_DIR="/tmp/sessions",
-            LOG_DIR="/tmp/logs",
-            ERROR_DIR="/tmp/errors",
+            DATA_DIR="/tmp/data",  # type: ignore[arg-type]
+            SESSION_DIR="/tmp/sessions",  # type: ignore[arg-type]
+            LOG_DIR="/tmp/logs",  # type: ignore[arg-type]
+            ERROR_DIR="/tmp/errors",  # type: ignore[arg-type]
         )
 
         assert isinstance(settings.DATA_DIR, Path)
@@ -154,10 +117,12 @@ class TestSettings:
 
         settings = Settings(TELEGRAM_TOKEN="123456:test")
 
-        assert settings.DATABASE_URL == "sqlite+aiosqlite:///./bot.db"
+        assert (
+            settings.DATABASE_URL
+            == "postgresql+asyncpg://user:password@localhost/claude_bot"
+        )
         assert settings.LOG_LEVEL == "INFO"
         assert settings.DEBUG is False
-        assert settings.FSM_STORAGE_TYPE == "memory"
         assert settings.PERMISSION_CACHE_TTL == 300
         assert settings.PLAYWRIGHT_HEADLESS is True
         assert settings.PLAYWRIGHT_TIMEOUT == 30000
