@@ -1,9 +1,6 @@
 """Playwright automation service for Claude.ai interactions."""
 
-import asyncio
 import logging
-from pathlib import Path
-from typing import Any
 
 from playwright.async_api import (
     Browser,
@@ -137,9 +134,7 @@ class PlaywrightService:
             ) from e
         except Exception as e:
             logger.error(f"Failed to initialize session for chat {chat_id}: {e}")
-            raise BrowserError(
-                f"❌ Failed to initialize session: {str(e)}"
-            ) from e
+            raise BrowserError(f"❌ Failed to initialize session: {str(e)}") from e
         finally:
             if context:
                 await context.close()
@@ -165,9 +160,7 @@ class PlaywrightService:
         """
         session_path = self.settings.SESSION_DIR / str(chat_id)
         if not session_path.exists():
-            raise SessionError(
-                "❌ No session found. Please run /init_session first."
-            )
+            raise SessionError("❌ No session found. Please run /init_session first.")
 
         context: BrowserContext | None = None
         page: Page | None = None
@@ -209,9 +202,7 @@ class PlaywrightService:
             ) from e
         except Exception as e:
             logger.error(f"Failed to process login link for chat {chat_id}: {e}")
-            raise BrowserError(
-                f"❌ Failed to process login link: {str(e)}"
-            ) from e
+            raise BrowserError(f"❌ Failed to process login link: {str(e)}") from e
         finally:
             if context:
                 await context.close()
@@ -261,11 +252,11 @@ class PlaywrightService:
             # Try multiple possible selectors
             code_element = None
             selectors = [
-                'code',  # <code> tag
+                "code",  # <code> tag
                 '[data-testid="auth-code"]',
                 'input[name="code"]',
-                'div.auth-code',
-                'pre.code',
+                "div.auth-code",
+                "pre.code",
             ]
 
             for selector in selectors:
@@ -276,14 +267,14 @@ class PlaywrightService:
                         state="visible",
                     )
                     break
-                except:
+                except PlaywrightTimeoutError:
                     continue
 
             if not code_element:
                 # Try to find any code-like text
                 await page.wait_for_load_state("networkidle")
                 code_text = await page.locator(
-                    'text=/^[A-Z0-9]{8,}$/'
+                    "text=/^[A-Z0-9]{8,}$/"
                 ).first.text_content()
 
                 if code_text:

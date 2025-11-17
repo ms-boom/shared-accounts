@@ -1,7 +1,7 @@
 """Service for checking user permissions in groups."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from aiogram import Bot
 
@@ -56,7 +56,9 @@ class PermissionService:
         if cache_key in self._cache:
             is_admin, cached_at = self._cache[cache_key]
             if self._is_cache_valid(cached_at):
-                logger.debug(f"Permission cache hit for user {user_id} in chat {chat_id}")
+                logger.debug(
+                    f"Permission cache hit for user {user_id} in chat {chat_id}"
+                )
                 return is_admin
 
         # Query Telegram API
@@ -78,7 +80,9 @@ class PermissionService:
                 del self._cache[cache_key]
             return False
 
-    def invalidate_cache(self, user_id: int | None = None, chat_id: int | None = None) -> None:
+    def invalidate_cache(
+        self, user_id: int | None = None, chat_id: int | None = None
+    ) -> None:
         """
         Invalidate permission cache.
 

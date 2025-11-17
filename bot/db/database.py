@@ -1,8 +1,8 @@
 """Database connection and session management."""
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from databases import Database as DatabasesDatabase
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -81,7 +81,9 @@ class Database:
         Only use for development/testing.
         """
         if not self.engine:
-            raise DatabaseError("Database engine not initialized. Call startup() first.")
+            raise DatabaseError(
+                "Database engine not initialized. Call startup() first."
+            )
 
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)

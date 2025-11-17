@@ -6,7 +6,6 @@ from datetime import datetime
 from databases import Database
 
 from bot.core.exceptions import DatabaseError
-from bot.db.models import ChatSession
 
 logger = logging.getLogger(__name__)
 

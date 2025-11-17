@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from pathlib import Path
 
 from aiogram import Bot
 from databases import Database
@@ -116,11 +115,15 @@ class TaskWorker:
             await self.send_message(chat_id, str(e))
 
         except Exception as e:
-            logger.error(f"Unexpected error processing task {task_id}: {e}", exc_info=True)
-            await self.task_repo.update_status(task_id, "failed", f"Internal error: {str(e)}")
+            logger.error(
+                f"Unexpected error processing task {task_id}: {e}", exc_info=True
+            )
+            await self.task_repo.update_status(
+                task_id, "failed", f"Internal error: {str(e)}"
+            )
             await self.send_message(
                 chat_id,
-                f"❌ An unexpected error occurred. Please try again later.",
+                "❌ An unexpected error occurred. Please try again later.",
             )
 
     async def process_init_session(
@@ -142,9 +145,7 @@ class TaskWorker:
             raise TaskError("Missing 'email' in payload")
 
         # Initialize session with Playwright
-        session_path, message = await self.playwright.initialize_session(
-            chat_id, email
-        )
+        session_path, message = await self.playwright.initialize_session(chat_id, email)
 
         # Create session record in database
         await self.session_repo.upsert(

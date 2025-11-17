@@ -121,9 +121,7 @@ class Settings(BaseSettings):
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         value_upper = value.upper()
         if value_upper not in valid_levels:
-            raise ValueError(
-                f"LOG_LEVEL must be one of {valid_levels}, got '{value}'"
-            )
+            raise ValueError(f"LOG_LEVEL must be one of {valid_levels}, got '{value}'")
         return value_upper
 
     @field_validator("FSM_STORAGE_TYPE")

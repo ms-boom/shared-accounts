@@ -8,7 +8,6 @@ from uuid import UUID
 from databases import Database
 
 from bot.core.exceptions import DatabaseError
-from bot.db.models import Task
 
 logger = logging.getLogger(__name__)
 
