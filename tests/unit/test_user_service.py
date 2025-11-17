@@ -1,13 +1,12 @@
 """Unit tests for bot/services/user_service.py."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from aiogram.types import User
 from databases import Database as DatabasesDatabase
 
 from bot.db.database import Database
-from bot.db.repositories.user_repository import UserRepository
 from bot.services.user_service import UserService
 
 

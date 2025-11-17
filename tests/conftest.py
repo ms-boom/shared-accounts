@@ -11,12 +11,11 @@ import pytest
 from aiogram import Bot
 from aiogram.types import Chat, ChatMember, User
 from databases import Database
+from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from bot.core.config import Settings
-from bot.db.models import Base, Task
-from sqlalchemy import JSON, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from bot.db.models import Base
 
 
 @pytest.fixture

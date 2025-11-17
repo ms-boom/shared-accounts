@@ -136,7 +136,7 @@ class GroupRepository:
         updates.append("updated_at = :updated_at")
         query = f"""
             UPDATE groups
-            SET {', '.join(updates)}
+            SET {", ".join(updates)}
             WHERE id = :group_id
             RETURNING id, title, username, type, created_at, updated_at
         """
