@@ -11,7 +11,6 @@ This module implements database fixtures with:
 
 import logging
 from collections.abc import AsyncGenerator
-from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -30,7 +29,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from bot.core.config import Settings
-from bot.db.models import Base
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +211,7 @@ def db_sessionmaker(db_savepoint: None) -> async_sessionmaker[AsyncSession]:
     The connection is already in a transaction with savepoint (db_savepoint).
     Savepoints are automatically recreated after commits via event listener.
     """
-    return Session  # type: ignore[return-value]
+    return Session
 
 
 @pytest.fixture(scope="function")
