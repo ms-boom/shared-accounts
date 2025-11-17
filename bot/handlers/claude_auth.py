@@ -74,7 +74,7 @@ async def init_session_handler(
                 )
                 return
         except Exception as e:
-            logger.error(f"Failed to check admin status: {e}")
+            logger.error("Failed to check admin status: %s", e)
             await message.reply("❌ Failed to verify permissions. Please try again.")
             return
 
@@ -127,7 +127,7 @@ async def init_session_handler(
         "Please wait for the authorization link request..."
     )
 
-    logger.info(f"Created init_session task {task['id']} for chat {message.chat.id}")
+    logger.info("Created init_session task %s for chat %s", task['id'], message.chat.id)
 
 
 @router.message(Command("get_code"))
@@ -192,7 +192,7 @@ async def get_code_handler(
 
     await message.reply("🔄 Extracting authorization code...")
 
-    logger.info(f"Created get_code task {task['id']} for chat {message.chat.id}")
+    logger.info("Created get_code task %s for chat %s", task['id'], message.chat.id)
 
 
 @router.message(Command("health"))
@@ -217,7 +217,7 @@ async def health_handler(
             db_status = "✅ Connected" if result else "❌ Error"
         except Exception as e:
             db_status = f"❌ Disconnected ({str(e)})"
-            logger.error(f"Database health check failed: {e}")
+            logger.error("Database health check failed: %s", e)
 
         # Get active sessions count
         session_repo = ChatSessionRepository(database)
@@ -226,7 +226,7 @@ async def health_handler(
             sessions_count = len(sessions)
         except Exception as e:
             sessions_count = "Error"
-            logger.error(f"Failed to get sessions count: {e}")
+            logger.error("Failed to get sessions count: %s", e)
 
         # Get pending tasks count
         task_repo = TaskRepository(database)
@@ -234,7 +234,7 @@ async def health_handler(
             pending_count = await task_repo.get_pending_count()
         except Exception as e:
             pending_count = "Error"
-            logger.error(f"Failed to get pending tasks count: {e}")
+            logger.error("Failed to get pending tasks count: %s", e)
 
         # Format response
         status_message = (
@@ -248,7 +248,7 @@ async def health_handler(
         await message.reply(status_message, parse_mode="HTML")
 
     except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
+        logger.error("Health check failed: %s", e, exc_info=True)
         await message.reply("❌ Failed to retrieve bot status. Please try again later.")
 
 

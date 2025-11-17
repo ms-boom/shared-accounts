@@ -55,9 +55,9 @@ class Database:
             self.database = DatabasesDatabase(self.database_url)
             await self.database.connect()
 
-            logger.info(f"Database connected: {self.database_url}")
+            logger.info("Database connected: %s", self.database_url)
         except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+            logger.error("Failed to connect to database: %s", e)
             raise DatabaseError(f"Database connection failed: {e}") from e
 
     async def shutdown(self) -> None:

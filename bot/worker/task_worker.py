@@ -79,7 +79,7 @@ class TaskWorker:
                         await asyncio.sleep(self.settings.WORKER_POLL_INTERVAL)
 
                 except Exception as e:
-                    logger.error(f"Error in worker loop: {e}", exc_info=True)
+                    logger.error("Error in worker loop: %s", e, exc_info=True)
                     await asyncio.sleep(self.settings.WORKER_POLL_INTERVAL)
 
         finally:
@@ -97,7 +97,7 @@ class TaskWorker:
         chat_id = task["chat_id"]
         payload = task["payload"]
 
-        logger.info(f"Processing task {task_id}: {task_type}")
+        logger.info("Processing task %s: %s", task_id, task_type)
 
         try:
             if task_type == "init_session":
@@ -110,7 +110,7 @@ class TaskWorker:
                 raise TaskError(f"Unknown task type: {task_type}")
 
         except (BrowserError, SessionError, TaskError) as e:
-            logger.error(f"Task {task_id} failed: {e}")
+            logger.error("Task %s failed: %s", task_id, e)
             await self.task_repo.update_status(task_id, "failed", str(e))
             await self.send_message(chat_id, str(e))
 
@@ -239,4 +239,4 @@ class TaskWorker:
                 parse_mode=parse_mode,
             )
         except Exception as e:
-            logger.error(f"Failed to send message to {chat_id}: {e}")
+            logger.error("Failed to send message to %s: %s", chat_id, e)

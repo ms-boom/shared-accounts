@@ -44,7 +44,7 @@ class PlaywrightService:
             )
             logger.info("Playwright browser started")
         except Exception as e:
-            logger.error(f"Failed to start Playwright: {e}")
+            logger.error("Failed to start Playwright: %s", e)
             raise BrowserError(f"Failed to start browser: {e}") from e
 
     async def stop(self) -> None:
@@ -56,7 +56,7 @@ class PlaywrightService:
                 await self.playwright.stop()
             logger.info("Playwright browser stopped")
         except Exception as e:
-            logger.error(f"Failed to stop Playwright: {e}")
+            logger.error("Failed to stop Playwright: %s", e)
 
     async def initialize_session(
         self,
@@ -96,12 +96,12 @@ class PlaywrightService:
                 "https://claude.ai/login",
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
             )
-            logger.info(f"Opened login page for chat {chat_id}")
+            logger.info("Opened login page for chat %s", chat_id)
 
             # Fill email field
             email_input = page.locator('input[type="email"]')
             await email_input.fill(email)
-            logger.info(f"Filled email for chat {chat_id}")
+            logger.info("Filled email for chat %s", chat_id)
 
             # Click "Continue with email" button
             continue_button = page.locator('button:has-text("Continue with email")')
@@ -112,7 +112,7 @@ class PlaywrightService:
                 'text="Check your email"',
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
             )
-            logger.info(f"Email sent confirmation for chat {chat_id}")
+            logger.info("Email sent confirmation for chat %s", chat_id)
 
             # Save session state
             await context.storage_state(path=str(session_path / "state.json"))
@@ -123,7 +123,7 @@ class PlaywrightService:
             )
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout during session init for chat {chat_id}: {e}")
+            logger.error("Timeout during session init for chat %s: %s", chat_id, e)
             # Save error screenshot
             if page:
                 screenshot_path = self.settings.ERROR_DIR / f"init_{chat_id}.png"
@@ -133,7 +133,7 @@ class PlaywrightService:
                 "❌ Operation timed out. The page took too long to respond."
             ) from e
         except Exception as e:
-            logger.error(f"Failed to initialize session for chat {chat_id}: {e}")
+            logger.error("Failed to initialize session for chat %s: %s", chat_id, e)
             raise BrowserError(f"❌ Failed to initialize session: {str(e)}") from e
         finally:
             if context:
@@ -184,7 +184,7 @@ class PlaywrightService:
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 state="visible",
             )
-            logger.info(f"Authentication successful for chat {chat_id}")
+            logger.info("Authentication successful for chat %s", chat_id)
 
             # Save authenticated session
             await context.storage_state(path=str(session_path / "state.json"))
@@ -192,7 +192,7 @@ class PlaywrightService:
             return "✅ Session initialized successfully! You can now use /get_code."
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout during login for chat {chat_id}: {e}")
+            logger.error("Timeout during login for chat %s: %s", chat_id, e)
             if page:
                 screenshot_path = self.settings.ERROR_DIR / f"login_{chat_id}.png"
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +201,7 @@ class PlaywrightService:
                 "❌ Login link is invalid or expired. Please run /init_session again."
             ) from e
         except Exception as e:
-            logger.error(f"Failed to process login link for chat {chat_id}: {e}")
+            logger.error("Failed to process login link for chat %s: %s", chat_id, e)
             raise BrowserError(f"❌ Failed to process login link: {str(e)}") from e
         finally:
             if context:
@@ -278,7 +278,7 @@ class PlaywrightService:
                 ).first.text_content()
 
                 if code_text:
-                    logger.info(f"Extracted code for chat {chat_id}")
+                    logger.info("Extracted code for chat %s", chat_id)
                     return code_text.strip()
                 else:
                     raise BrowserError("Could not find authorization code on page")
@@ -291,11 +291,11 @@ class PlaywrightService:
             if not code:
                 raise BrowserError("Authorization code element is empty")
 
-            logger.info(f"Extracted code for chat {chat_id}")
+            logger.info("Extracted code for chat %s", chat_id)
             return code.strip()
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout extracting code for chat {chat_id}: {e}")
+            logger.error("Timeout extracting code for chat %s: %s", chat_id, e)
             if page:
                 screenshot_path = self.settings.ERROR_DIR / f"extract_{chat_id}.png"
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,7 +306,7 @@ class PlaywrightService:
         except SessionError:
             raise
         except Exception as e:
-            logger.error(f"Failed to extract code for chat {chat_id}: {e}")
+            logger.error("Failed to extract code for chat %s: %s", chat_id, e)
 
             # Check if session is invalid (401/403)
             if "401" in str(e) or "403" in str(e) or "unauthorized" in str(e).lower():

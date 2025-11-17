@@ -72,7 +72,7 @@ async def main() -> None:
     setup_logging(settings)
 
     logger.info("Starting Telegram Bot Template")
-    logger.info(f"Debug mode: {settings.DEBUG}")
+    logger.info("Debug mode: %s", settings.DEBUG)
 
     # Create DI container
     container = create_container(settings)
@@ -120,7 +120,7 @@ async def main() -> None:
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
     except Exception as e:
-        logger.exception(f"Error during polling: {e}")
+        logger.exception("Error during polling: %s", e)
     finally:
         # Shutdown
         await on_shutdown(bot, database)
@@ -133,5 +133,5 @@ if __name__ == "__main__":
         logger.info("Bot stopped by user")
         sys.exit(0)
     except Exception as e:
-        logger.exception(f"Fatal error: {e}")
+        logger.exception("Fatal error: %s", e)
         sys.exit(1)

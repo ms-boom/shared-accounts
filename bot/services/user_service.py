@@ -38,7 +38,7 @@ class UserService:
 
         if existing:
             # Update existing user info
-            logger.info(f"Updating existing user: {user_id}")
+            logger.info("Updating existing user: %s", user_id)
             return await self.repository.update(
                 user_id=user_id,
                 username=user.username,
@@ -48,7 +48,7 @@ class UserService:
             )
         else:
             # Create new user
-            logger.info(f"Registering new user: {user_id}")
+            logger.info("Registering new user: %s", user_id)
             return await self.repository.create(
                 user_id=user_id,
                 username=user.username,

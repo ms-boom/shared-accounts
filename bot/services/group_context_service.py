@@ -24,7 +24,7 @@ class GroupContextService:
             group_id: Telegram chat_id to set as selected
         """
         await state.update_data(selected_group_id=group_id)
-        logger.debug(f"Set selected group to {group_id}")
+        logger.debug("Set selected group to %s", group_id)
 
     async def get_selected_group(self, state: FSMContext) -> int | None:
         """
@@ -38,7 +38,7 @@ class GroupContextService:
         """
         data = await state.get_data()
         group_id = data.get("selected_group_id")
-        logger.debug(f"Retrieved selected group: {group_id}")
+        logger.debug("Retrieved selected group: %s", group_id)
         return group_id
 
     async def clear_selected_group(self, state: FSMContext) -> None:

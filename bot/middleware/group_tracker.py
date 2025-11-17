@@ -55,13 +55,13 @@ class GroupTrackerMiddleware(BaseMiddleware):
                 try:
                     await self.user_service.register_user(event.from_user)
                 except Exception as e:
-                    logger.error(f"Failed to register user: {e}")
+                    logger.error("Failed to register user: %s", e)
 
             # Register group if message is from group
             if event.chat and event.chat.type in ["group", "supergroup"]:
                 try:
                     await self.group_service.register_group(event.chat)
                 except Exception as e:
-                    logger.error(f"Failed to register group: {e}")
+                    logger.error("Failed to register group: %s", e)
 
         return await handler(event, data)

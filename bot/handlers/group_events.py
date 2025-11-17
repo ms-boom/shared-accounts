@@ -34,16 +34,16 @@ async def on_bot_status_changed(
 
     # Bot was added to group
     if new_status in ["member", "administrator"] and old_status in ["left", "kicked"]:
-        logger.info(f"Bot added to group {event.chat.id} ({event.chat.title})")
+        logger.info("Bot added to group %s (%s)", event.chat.id, event.chat.title)
         try:
             await group_service.register_group(event.chat)
-            logger.info(f"Group {event.chat.id} registered successfully")
+            logger.info("Group %s registered successfully", event.chat.id)
         except Exception as e:
-            logger.error(f"Failed to register group {event.chat.id}: {e}")
+            logger.error("Failed to register group %s: %s", event.chat.id, e)
 
     # Bot was removed from group
     elif old_status in ["member", "administrator"] and new_status in ["left", "kicked"]:
-        logger.info(f"Bot removed from group {event.chat.id} ({event.chat.title})")
+        logger.info("Bot removed from group %s (%s)", event.chat.id, event.chat.title)
         # Note: We don't delete the group from database (soft delete pattern)
         # You might want to add a "is_active" field to track this
 

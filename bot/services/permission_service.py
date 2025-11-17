@@ -74,7 +74,7 @@ class PermissionService:
 
             return is_admin
         except Exception as e:
-            logger.error(f"Failed to check permissions for user {user_id}: {e}")
+            logger.error("Failed to check permissions for user %s: %s", user_id, e)
             # Invalidate cache on error
             if cache_key in self._cache:
                 del self._cache[cache_key]
@@ -107,4 +107,4 @@ class PermissionService:
             for key in keys_to_delete:
                 del self._cache[key]
 
-            logger.info(f"Invalidated {len(keys_to_delete)} permission cache entries")
+            logger.info("Invalidated %s permission cache entries", len(keys_to_delete))

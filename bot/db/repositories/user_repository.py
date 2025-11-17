@@ -44,7 +44,7 @@ class UserRepository:
             result = await self.db.fetch_one(query, {"user_id": user_id})
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to get user {user_id}: {e}")
+            logger.error("Failed to get user %s: %s", user_id, e)
             raise DatabaseError(f"Failed to get user: {e}") from e
 
     async def create(
@@ -89,10 +89,10 @@ class UserRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Created user: {user_id} ({first_name})")
+            logger.info("Created user: %s (%s)", user_id, first_name)
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to create user {user_id}: {e}")
+            logger.error("Failed to create user %s: %s", user_id, e)
             raise DatabaseError(f"Failed to create user: {e}") from e
 
     async def update(
@@ -158,8 +158,8 @@ class UserRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Updated user: {user_id}")
+            logger.info("Updated user: %s", user_id)
             return dict(result) if result else existing
         except Exception as e:
-            logger.error(f"Failed to update user {user_id}: {e}")
+            logger.error("Failed to update user %s: %s", user_id, e)
             raise DatabaseError(f"Failed to update user: {e}") from e

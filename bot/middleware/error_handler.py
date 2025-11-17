@@ -40,11 +40,11 @@ class ErrorHandlerMiddleware(BaseMiddleware):
             return await handler(event, data)
         except BotError as e:
             # Known bot errors - log and inform user
-            logger.warning(f"Bot error: {e}")
+            logger.warning("Bot error: %s", e)
             await self._send_error_message(event, str(e))
         except Exception as e:
             # Unknown errors - log with stack trace
-            logger.exception(f"Unexpected error: {e}")
+            logger.exception("Unexpected error: %s", e)
             await self._send_error_message(event, "Произошла ошибка. Попробуйте позже.")
         return None
 
@@ -62,4 +62,4 @@ class ErrorHandlerMiddleware(BaseMiddleware):
             elif isinstance(event, Update) and event.callback_query:
                 await event.callback_query.answer(message, show_alert=True)
         except Exception as e:
-            logger.error(f"Failed to send error message: {e}")
+            logger.error("Failed to send error message: %s", e)

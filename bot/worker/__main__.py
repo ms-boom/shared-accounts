@@ -36,7 +36,7 @@ async def main() -> None:
     # Initialize database connection
     database = Database(settings.DATABASE_URL)
     await database.connect()
-    logger.info(f"Connected to database: {settings.DATABASE_URL}")
+    logger.info("Connected to database: %s", settings.DATABASE_URL)
 
     # Initialize Telegram bot
     bot = Bot(token=settings.TELEGRAM_TOKEN)
@@ -48,7 +48,7 @@ async def main() -> None:
     stop_event = asyncio.Event()
 
     def signal_handler(sig):
-        logger.info(f"Received signal {sig}, shutting down...")
+        logger.info("Received signal %s, shutting down...", sig)
         stop_event.set()
 
     # Register signal handlers

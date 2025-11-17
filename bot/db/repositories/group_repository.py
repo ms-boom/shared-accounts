@@ -44,7 +44,7 @@ class GroupRepository:
             result = await self.db.fetch_one(query, {"group_id": group_id})
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to get group {group_id}: {e}")
+            logger.error("Failed to get group %s: %s", group_id, e)
             raise DatabaseError(f"Failed to get group: {e}") from e
 
     async def create(
@@ -86,10 +86,10 @@ class GroupRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Created group: {group_id} ({title})")
+            logger.info("Created group: %s (%s)", group_id, title)
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to create group {group_id}: {e}")
+            logger.error("Failed to create group %s: %s", group_id, e)
             raise DatabaseError(f"Failed to create group: {e}") from e
 
     async def update(
@@ -143,10 +143,10 @@ class GroupRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Updated group: {group_id}")
+            logger.info("Updated group: %s", group_id)
             return dict(result) if result else existing
         except Exception as e:
-            logger.error(f"Failed to update group {group_id}: {e}")
+            logger.error("Failed to update group %s: %s", group_id, e)
             raise DatabaseError(f"Failed to update group: {e}") from e
 
     async def get_all(self) -> list[dict]:
@@ -168,5 +168,5 @@ class GroupRepository:
             results = await self.db.fetch_all(query)
             return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Failed to get all groups: {e}")
+            logger.error("Failed to get all groups: %s", e)
             raise DatabaseError(f"Failed to get all groups: {e}") from e

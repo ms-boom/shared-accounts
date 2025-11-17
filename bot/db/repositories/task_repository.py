@@ -47,7 +47,7 @@ class TaskRepository:
             result = await self.db.fetch_one(query, {"task_id": str(task_id)})
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to get task {task_id}: {e}")
+            logger.error("Failed to get task %s: %s", task_id, e)
             raise DatabaseError(f"Failed to get task: {e}") from e
 
     async def create(
@@ -91,10 +91,10 @@ class TaskRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Created task {result['id']} for chat {chat_id}")
+            logger.info("Created task %s for chat %s", result['id'], chat_id)
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to create task for chat {chat_id}: {e}")
+            logger.error("Failed to create task for chat %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to create task: {e}") from e
 
     async def update_status(
@@ -136,10 +136,10 @@ class TaskRepository:
         try:
             result_row = await self.db.fetch_one(query, values)
             if result_row:
-                logger.info(f"Updated task {task_id} status to {status}")
+                logger.info("Updated task %s status to %s", task_id, status)
             return dict(result_row) if result_row else None
         except Exception as e:
-            logger.error(f"Failed to update task {task_id}: {e}")
+            logger.error("Failed to update task %s: %s", task_id, e)
             raise DatabaseError(f"Failed to update task: {e}") from e
 
     async def dequeue_pending_task(self) -> dict | None:
@@ -189,10 +189,10 @@ class TaskRepository:
 
             result = await self.db.fetch_one(update_query, values)
             if result:
-                logger.info(f"Dequeued task {result['id']} for processing")
+                logger.info("Dequeued task %s for processing", result['id'])
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to dequeue pending task: {e}")
+            logger.error("Failed to dequeue pending task: %s", e)
             raise DatabaseError(f"Failed to dequeue pending task: {e}") from e
 
     async def get_pending_count(self) -> int:
@@ -214,7 +214,7 @@ class TaskRepository:
             result = await self.db.fetch_one(query)
             return result["count"] if result else 0
         except Exception as e:
-            logger.error(f"Failed to get pending task count: {e}")
+            logger.error("Failed to get pending task count: %s", e)
             raise DatabaseError(f"Failed to get pending task count: {e}") from e
 
     async def get_by_chat_id(
@@ -249,5 +249,5 @@ class TaskRepository:
             )
             return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Failed to get tasks for chat {chat_id}: {e}")
+            logger.error("Failed to get tasks for chat %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to get tasks for chat: {e}") from e

@@ -40,7 +40,7 @@ def setup_logging(settings: Settings) -> None:
 
     # Log startup message
     logger = logging.getLogger(__name__)
-    logger.info(f"Logging configured with level: {settings.LOG_LEVEL}")
+    logger.info("Logging configured with level: %s", settings.LOG_LEVEL)
     if settings.DEBUG:
         logger.warning("DEBUG mode is enabled - DO NOT use in production!")
 

@@ -44,7 +44,7 @@ class ChatSessionRepository:
             result = await self.db.fetch_one(query, {"chat_id": chat_id})
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to get chat session for {chat_id}: {e}")
+            logger.error("Failed to get chat session for %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to get chat session: {e}") from e
 
     async def create(
@@ -82,10 +82,10 @@ class ChatSessionRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Created chat session for {chat_id} ({email})")
+            logger.info("Created chat session for %s (%s)", chat_id, email)
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to create chat session for {chat_id}: {e}")
+            logger.error("Failed to create chat session for %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to create chat session: {e}") from e
 
     async def update_last_used(self, chat_id: int) -> dict | None:
@@ -115,10 +115,10 @@ class ChatSessionRepository:
         try:
             result = await self.db.fetch_one(query, values)
             if result:
-                logger.info(f"Updated last_used for chat session {chat_id}")
+                logger.info("Updated last_used for chat session %s", chat_id)
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to update last_used for {chat_id}: {e}")
+            logger.error("Failed to update last_used for %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to update last_used: {e}") from e
 
     async def delete(self, chat_id: int) -> bool:
@@ -140,10 +140,10 @@ class ChatSessionRepository:
         """
         try:
             await self.db.execute(query, {"chat_id": chat_id})
-            logger.info(f"Deleted chat session for {chat_id}")
+            logger.info("Deleted chat session for %s", chat_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to delete chat session for {chat_id}: {e}")
+            logger.error("Failed to delete chat session for %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to delete chat session: {e}") from e
 
     async def upsert(
@@ -185,10 +185,10 @@ class ChatSessionRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
-            logger.info(f"Upserted chat session for {chat_id} ({email})")
+            logger.info("Upserted chat session for %s (%s)", chat_id, email)
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to upsert chat session for {chat_id}: {e}")
+            logger.error("Failed to upsert chat session for %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to upsert chat session: {e}") from e
 
     async def lock_for_update(self, chat_id: int) -> dict | None:
@@ -218,7 +218,7 @@ class ChatSessionRepository:
             result = await self.db.fetch_one(query, {"chat_id": chat_id})
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Failed to lock chat session {chat_id}: {e}")
+            logger.error("Failed to lock chat session %s: %s", chat_id, e)
             raise DatabaseError(f"Failed to lock chat session: {e}") from e
 
     async def get_all_active(self) -> list[dict]:
@@ -240,5 +240,5 @@ class ChatSessionRepository:
             results = await self.db.fetch_all(query)
             return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Failed to get all chat sessions: {e}")
+            logger.error("Failed to get all chat sessions: %s", e)
             raise DatabaseError(f"Failed to get all chat sessions: {e}") from e

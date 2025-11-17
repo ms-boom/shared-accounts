@@ -38,7 +38,7 @@ class GroupService:
 
         if existing:
             # Update existing group info
-            logger.info(f"Updating existing group: {group_id}")
+            logger.info("Updating existing group: %s", group_id)
             return await self.repository.update(
                 group_id=group_id,
                 title=chat.title,
@@ -46,7 +46,7 @@ class GroupService:
             )
         else:
             # Create new group
-            logger.info(f"Registering new group: {group_id}")
+            logger.info("Registering new group: %s", group_id)
             return await self.repository.create(
                 group_id=group_id,
                 title=chat.title or "Unknown",
