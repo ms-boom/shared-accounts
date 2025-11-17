@@ -118,28 +118,26 @@ class GroupRepository:
         if not existing:
             raise GroupNotFoundError(f"Group {group_id} not found")
 
-        # Build update query dynamically
-        updates = []
-        values = {"group_id": group_id, "updated_at": datetime.utcnow()}
-
-        if title is not None:
-            updates.append("title = :title")
-            values["title"] = title
-
-        if username is not None:
-            updates.append("username = :username")
-            values["username"] = username
-
-        if not updates:
+        # Check if there's anything to update
+        if title is None and username is None:
             return existing
 
-        updates.append("updated_at = :updated_at")
-        query = f"""
+        # Static query using COALESCE to update only provided fields
+        query = """
             UPDATE groups
-            SET {", ".join(updates)}
+            SET title = COALESCE(:title, title),
+                username = COALESCE(:username, username),
+                updated_at = :updated_at
             WHERE id = :group_id
             RETURNING id, title, username, type, created_at, updated_at
         """
+
+        values = {
+            "group_id": group_id,
+            "title": title,
+            "username": username,
+            "updated_at": datetime.utcnow(),
+        }
 
         try:
             result = await self.db.fetch_one(query, values)
