@@ -5,7 +5,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from databases import Database as DatabasesDatabase
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from bot.core.config import Settings
 from bot.core.exceptions import DatabaseError
@@ -32,6 +37,7 @@ class Database:
         self.database_url = settings.DATABASE_URL
         self.engine: AsyncEngine | None = None
         self.database: DatabasesDatabase | None = None
+        self.session_maker: async_sessionmaker[AsyncSession] | None = None
 
     async def startup(self) -> None:
         """
@@ -49,6 +55,13 @@ class Database:
                 self.database_url,
                 echo=self.settings.DEBUG,
                 future=True,
+            )
+
+            # Create session maker for SQLAlchemy ORM operations
+            self.session_maker = async_sessionmaker(
+                self.engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
             )
 
             # Create databases instance for async queries

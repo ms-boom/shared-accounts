@@ -7,12 +7,12 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.core.config import get_settings
 from bot.core.container import create_container
 from bot.core.logging_config import setup_logging
 from bot.db.database import Database
+from bot.db.fsm_storage import PostgreSQLStorage
 from bot.handlers import claude_auth, common, group_admin, group_events
 from bot.middleware.error_handler import ErrorHandlerMiddleware
 from bot.middleware.group_tracker import GroupTrackerMiddleware
@@ -84,14 +84,19 @@ async def main() -> None:
     group_service = GroupService(database)
     user_service = UserService(database)
 
-    # Create bot and dispatcher
+    # Create bot
     bot = Bot(
         token=settings.TELEGRAM_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
-    # Use memory storage for FSM (can be replaced with Redis in production)
-    storage = MemoryStorage()
+    # Startup database (must be done before creating FSM storage)
+    await on_startup(bot, database, settings.DEBUG)
+
+    # Use PostgreSQL storage for FSM (persistent state across bot restarts)
+    if not database.session_maker:
+        raise RuntimeError("Database session_maker not initialized")
+    storage = PostgreSQLStorage(database.session_maker)
     dp = Dispatcher(storage=storage)
 
     # Register middleware
@@ -110,9 +115,6 @@ async def main() -> None:
     dp.include_router(claude_auth.router)
     dp.include_router(group_events.router)
     dp.include_router(group_admin.router)
-
-    # Startup
-    await on_startup(bot, database, settings.DEBUG)
 
     try:
         # Start polling

@@ -33,6 +33,7 @@
 │   ├── db/                        # Слой работы с БД
 │   │   ├── database.py           # Подключение к БД (databases + asyncpg)
 │   │   ├── models.py             # SQLAlchemy модели
+│   │   ├── fsm_storage.py        # PostgreSQL FSM Storage для aiogram
 │   │   └── repositories/         # Repository Pattern
 │   │       ├── chat_session_repository.py
 │   │       ├── group_repository.py
@@ -186,7 +187,32 @@ Playwright (headless browser)
 - PostgreSQL как очередь с `SELECT FOR UPDATE SKIP LOCKED`
 - Retry механизм с экспоненциальной задержкой (2s, 4s, 8s)
 
-### 6. Изоляция браузерных сессий
+### 6. PostgreSQL FSM Storage
+
+Состояния FSM (Finite State Machine) для aiogram хранятся в PostgreSQL:
+
+```python
+# bot/db/fsm_storage.py
+class PostgreSQLStorage(BaseStorage):
+    """PostgreSQL-based FSM storage for aiogram."""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        self.session_maker = session_maker
+```
+
+**Преимущества:**
+- Персистентность состояний (сохраняются при перезапуске бота)
+- Поддержка Topics через композитный ключ (chat_id, user_id, thread_id)
+- Thread-safe конкурентный доступ
+- Хранение данных в JSONB для гибкости
+
+**Таблица FSM:**
+- Композитный PRIMARY KEY: `(chat_id, user_id, thread_id)`
+- Поле `state`: текущее состояние FSM (nullable)
+- Поле `data`: JSONB для хранения данных состояния
+- Автоматическое обновление `updated_at`
+
+### 7. Изоляция браузерных сессий
 
 Каждый chat_id имеет свою изолированную Playwright сессию:
 
@@ -212,8 +238,8 @@ Playwright (headless browser)
 | **Python** | 3.12+ | Основной язык |
 | **aiogram** | 3.13+ | Telegram Bot framework (async) |
 | **Playwright** | 1.40+ | Headless browser automation |
-| **PostgreSQL** | 15+ | БД + очередь задач |
-| **SQLAlchemy** | 2.0+ | ORM (async) |
+| **PostgreSQL** | 15+ | БД + очередь задач + FSM Storage |
+| **SQLAlchemy** | 2.0+ | ORM (async) + FSM Storage |
 | **Alembic** | 1.14+ | Database migrations |
 | **asyncpg** | 0.30+ | Async PostgreSQL driver |
 | **databases** | 0.9+ | Query builder (async) |
