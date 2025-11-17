@@ -1,7 +1,13 @@
-"""Shared test fixtures and configuration."""
+"""Global test configuration and fixtures.
+
+This module configures pytest for the test infrastructure and imports
+modular fixtures from the fixtures/ directory.
+
+IMPORTANT: Modular fixtures are loaded in specific order to ensure
+proper initialization of session-scoped async resources.
+"""
 
 import os
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -9,14 +15,14 @@ from uuid import uuid4
 
 import pytest
 from aiogram import Bot
-from aiogram.enums import ChatMemberStatus
-from aiogram.types import Chat, ChatMemberAdministrator, ChatMemberMember, User
-from databases import Database
-from sqlalchemy import JSON
-from sqlalchemy.ext.asyncio import create_async_engine
+from aiogram.types import Chat, ChatMember, User
 
-from bot.core.config import Settings
-from bot.db.models import Base
+# Configure asyncio mode for pytest-asyncio
+# IMPORTANT: environment must be first to load event_loop fixture before async fixtures
+pytest_plugins = [
+    "tests.fixtures.environment",
+    "tests.fixtures.database",
+]
 
 
 @pytest.fixture
@@ -31,105 +37,6 @@ def temp_dir(tmp_path: Path) -> Path:
         Path to temporary directory
     """
     return tmp_path
-
-
-@pytest.fixture
-def test_settings(temp_dir: Path) -> Settings:
-    """
-    Create test settings with safe defaults.
-
-    Args:
-        temp_dir: Temporary directory for test data
-
-    Returns:
-        Settings instance configured for testing
-    """
-    os.environ["TELEGRAM_TOKEN"] = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-
-    return Settings(
-        TELEGRAM_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-        DATABASE_URL=f"sqlite+aiosqlite:///{temp_dir}/test.db",
-        LOG_LEVEL="DEBUG",
-        DEBUG=True,
-        DATA_DIR=temp_dir / "data",
-        SESSION_DIR=temp_dir / "sessions",
-        LOG_DIR=temp_dir / "logs",
-        ERROR_DIR=temp_dir / "errors",
-        PERMISSION_CACHE_TTL=1,  # Short TTL for testing
-    )
-
-
-@pytest.fixture
-async def test_database(test_settings: Settings) -> AsyncIterator[Database]:
-    """
-    Create test database with schema using SQLAlchemy models.
-
-    Uses SQLAlchemy Base.metadata.create_all() to create schema from models.
-    This ensures test schema matches production models defined in bot/db/models.py.
-
-    Args:
-        test_settings: Test settings fixture
-
-    Yields:
-        Connected database instance
-
-    Note:
-        - Automatically creates schema from SQLAlchemy models
-        - Cleans up after test
-        - For SQLite: PostgreSQL-specific types (JSONB → JSON) are automatically adapted
-        - For full integration tests with migrations, use PostgreSQL database
-    """
-    # Create async engine for schema creation
-    engine = create_async_engine(test_settings.DATABASE_URL, echo=False)
-
-    # For SQLite, replace JSONB with JSON (SQLite-compatible)
-    # NOTE: This is a test-only workaround. Production uses PostgreSQL exclusively.
-    if "sqlite" in test_settings.DATABASE_URL:
-        original_types: dict[str, Any] = {}
-
-        # Adapt tasks.payload column
-        tasks_table = Base.metadata.tables.get("tasks")
-        if tasks_table is not None:
-            payload_column = tasks_table.c.payload
-            original_types["tasks.payload"] = payload_column.type
-            payload_column.type = JSON()
-
-        # Adapt fsm_states.data column
-        fsm_states_table = Base.metadata.tables.get("fsm_states")
-        if fsm_states_table is not None:
-            data_column = fsm_states_table.c.data
-            original_types["fsm_states.data"] = data_column.type
-            data_column.type = JSON()
-
-        try:
-            # Create all tables from models
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-        finally:
-            # Restore original types
-            if tasks_table is not None and "tasks.payload" in original_types:
-                tasks_table.c.payload.type = original_types["tasks.payload"]
-            if fsm_states_table is not None and "fsm_states.data" in original_types:
-                fsm_states_table.c.data.type = original_types["fsm_states.data"]
-    else:
-        # For PostgreSQL, use original models
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    # Create databases connection for tests
-    database = Database(test_settings.DATABASE_URL)
-    await database.connect()
-
-    yield database
-
-    # Cleanup
-    await database.disconnect()
-
-    # Drop all tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-    await engine.dispose()
 
 
 @pytest.fixture
