@@ -11,9 +11,12 @@ import pytest
 from aiogram import Bot
 from aiogram.types import Chat, ChatMember, User
 from databases import Database
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from bot.core.config import Settings
-from bot.core.exceptions import DatabaseError
+from bot.db.models import Base, Task
+from sqlalchemy import JSON, Text
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 @pytest.fixture
@@ -59,7 +62,10 @@ def test_settings(temp_dir: Path) -> Settings:
 @pytest.fixture
 async def test_database(test_settings: Settings) -> AsyncIterator[Database]:
     """
-    Create test database with schema.
+    Create test database with schema using SQLAlchemy models.
+
+    Uses SQLAlchemy Base.metadata.create_all() to create schema from models.
+    This ensures test schema matches production models defined in bot/db/models.py.
 
     Args:
         test_settings: Test settings fixture
@@ -68,80 +74,56 @@ async def test_database(test_settings: Settings) -> AsyncIterator[Database]:
         Connected database instance
 
     Note:
-        Automatically creates schema and cleans up after test
+        - Automatically creates schema from SQLAlchemy models
+        - Cleans up after test
+        - For SQLite: PostgreSQL-specific types (JSONB → JSON) are automatically adapted
+        - For full integration tests with migrations, use PostgreSQL database
     """
+    # Create async engine for schema creation
+    engine = create_async_engine(test_settings.DATABASE_URL, echo=False)
+
+    # For SQLite, replace JSONB with JSON (SQLite-compatible)
+    if "sqlite" in test_settings.DATABASE_URL:
+        # Get tasks table from metadata
+        tasks_table = Base.metadata.tables.get("tasks")
+        if tasks_table is not None:
+            # Store original type for restoration
+            payload_column = tasks_table.c.payload
+            original_type = payload_column.type
+
+            # Replace JSONB with JSON for SQLite
+            payload_column.type = JSON()
+
+            try:
+                # Create all tables from models
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+            finally:
+                # Restore original type
+                payload_column.type = original_type
+        else:
+            # Fallback if tasks table not found
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+    else:
+        # For PostgreSQL, use original models
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    # Create databases connection for tests
     database = Database(test_settings.DATABASE_URL)
-
     await database.connect()
-
-    # Create schema
-    await _create_test_schema(database)
 
     yield database
 
+    # Cleanup
     await database.disconnect()
 
+    # Drop all tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
-async def _create_test_schema(database: Database) -> None:
-    """
-    Create test database schema.
-
-    Args:
-        database: Database connection
-
-    Raises:
-        DatabaseError: If schema creation fails
-    """
-    schema_queries = [
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT NOT NULL,
-            last_name TEXT,
-            language_code TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS groups (
-            id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL,
-            type TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS chat_sessions (
-            chat_id INTEGER PRIMARY KEY,
-            email TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY,
-            chat_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            task_type TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            status TEXT NOT NULL,
-            result TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """,
-    ]
-
-    try:
-        for query in schema_queries:
-            await database.execute(query)
-    except Exception as e:
-        raise DatabaseError(f"Failed to create test schema: {e}") from e
+    await engine.dispose()
 
 
 @pytest.fixture
