@@ -12,7 +12,9 @@ class TestUserRepository:
     """Tests for UserRepository class."""
 
     @pytest.fixture
-    def user_repository(self, test_database_adapter: DatabasesAdapter) -> UserRepository:
+    def user_repository(
+        self, test_database_adapter: DatabasesAdapter
+    ) -> UserRepository:
         """
         Create UserRepository instance for testing.
 
@@ -24,9 +26,7 @@ class TestUserRepository:
         """
         return UserRepository(test_database_adapter)
 
-    async def test_creates_user(
-        self, user_repository: UserRepository
-    ) -> None:
+    async def test_creates_user(self, user_repository: UserRepository) -> None:
         """Test creating a new user."""
         user_id = 123456789
         username = "testuser"

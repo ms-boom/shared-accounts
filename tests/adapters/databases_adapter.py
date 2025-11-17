@@ -76,9 +76,7 @@ class DatabasesAdapter:
         """
         await self.session.execute(text(query), values or {})
 
-    async def execute_many(
-        self, query: str, values: list[dict[str, Any]]
-    ) -> None:
+    async def execute_many(self, query: str, values: list[dict[str, Any]]) -> None:
         """Execute query multiple times with different values.
 
         Args:
