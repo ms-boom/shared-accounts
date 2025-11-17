@@ -1,5 +1,5 @@
 [project]
-name = "telegram-bot-template"
+name = "shared-accounts"
 version = "0.1.0"
 description = "Production-ready Telegram bot template with group management"
 readme = "README.md"
