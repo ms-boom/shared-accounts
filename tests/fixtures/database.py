@@ -187,20 +187,30 @@ async def db_transaction(db_connection: AsyncConnection) -> AsyncGenerator[None,
 
 @pytest.fixture(scope="function")
 async def db_savepoint(
-    db_transaction: None,
+    db_transaction: None, db_connection: AsyncConnection
 ) -> AsyncGenerator[None, None]:
-    """Savepoint fixture for compatibility.
+    """Savepoint with automatic recreation after commit.
 
-    Note: In async SQLAlchemy with asyncpg, nested transactions (savepoints)
-    work differently than in sync mode. For test isolation, we rely on
-    the db_transaction fixture which provides automatic rollback.
+    This fixture creates a SAVEPOINT and registers an event listener
+    that automatically recreates the savepoint after each transaction end.
+    This allows fixture code to use commit() while maintaining test isolation.
 
-    This fixture is kept for API compatibility but doesn't create
-    an actual savepoint. Tests should use db_session.flush() instead
-    of db_session.commit() for better control, or accept that commit()
-    will work within the transaction context.
+    Pattern from intern-contest-cabinet project for compatibility with fixture commits.
+    Event listener is called synchronously, so it uses sync_connection.
     """
+    savepoint: (
+        sa.ext.asyncio.AsyncTransaction | sa.engine.NestedTransaction
+    ) = await db_connection.begin_nested()
+
+    def on_release_savepoint(session, tx):
+        nonlocal savepoint
+        if not savepoint.is_active:
+            # Event listener is called synchronously, use sync_connection
+            savepoint = db_connection.sync_connection.begin_nested()
+
+    sa.event.listen(sa.orm.Session, "after_transaction_end", on_release_savepoint)
     yield
+    sa.event.remove(sa.orm.Session, "after_transaction_end", on_release_savepoint)
 
 
 @pytest.fixture(scope="function")

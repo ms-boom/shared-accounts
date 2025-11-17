@@ -90,18 +90,14 @@ async def test_with_transaction(db_transaction, db_session):
 ```
 
 #### `db_savepoint` (scope=function)
-Savepoint fixture для совместимости API.
+Savepoint с автоматическим пересозданием после commit.
 
-**Важно:** В async SQLAlchemy с asyncpg драйвером savepoint работает иначе, чем в sync режиме.
-Эта фикстура сохранена для совместимости, но не создает реальный savepoint.
-
-**Изоляция тестов:** Обеспечивается через `db_transaction` с автоматическим rollback.
+**Ключевая особенность:** Позволяет фикстурам делать `commit()` без нарушения изоляции.
 
 ```python
 async def test_with_savepoint(db_savepoint, db_session):
-    # Изоляция через db_transaction
-    # commit() работает в контексте транзакции
-    # Все изменения откатятся после теста
+    # Фикстуры могут делать commit()
+    # Savepoint автоматически пересоздается
     pass
 ```
 
@@ -189,28 +185,25 @@ async def test_user_not_exists(db_session):
     assert result is None  # ✅ Пользователь из теста 1 откачен
 ```
 
-### Transaction Pattern для Async SQLAlchemy
+### Savepoint Pattern
 
-**Важно:** В async SQLAlchemy с asyncpg драйвером savepoint pattern работает иначе, чем в sync режиме.
+**Проблема:** Фикстуры могут делать `commit()`, что нарушает изоляцию.
 
-**Решение:** Используется `db_transaction` fixture с автоматическим rollback после каждого теста.
-
-**Commit в тестах:** `commit()` работает в контексте транзакции. Изменения видны внутри теста,
-но автоматически откатываются после завершения теста.
+**Решение:** Event listener автоматически пересоздает savepoint после каждого commit.
 
 ```python
 # В фикстуре
 async def create_test_user(db_session):
     user = User(id=999, first_name="Fixture User")
     db_session.add(user)
-    await db_session.commit()  # ✅ Работает в контексте транзакции!
+    await db_session.commit()  # ✅ Работает!
     return user
 
 # В тесте
 async def test_with_fixture_user(db_session, create_test_user):
     user = create_test_user
-    # Фикстура сделала commit, изменения видны
-    # После теста всё откатится через db_transaction
+    # Фикстура сделала commit, но изоляция сохранена
+    # После теста все откатится
 ```
 
 ## Миграции
