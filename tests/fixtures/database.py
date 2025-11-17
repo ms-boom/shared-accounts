@@ -28,16 +28,17 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+# Ensure custom dialect is registered
+# Import triggers registration in bot.db.dialect
+import bot.db.dialect  # noqa: F401
+import bot.db.database as db  # Import production database module
 from bot.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-# Global test Session - будет переконфигурирован в фикстуре db_connection
-# Pattern from intern-contest-cabinet for compatibility with db_savepoint event listener
-Session = sa.orm.sessionmaker(
-    expire_on_commit=False,
-    class_=sa.ext.asyncio.AsyncSession,
-)
+# Use global Session from production code
+# Pattern from statements/ - no need to create test-specific Session
+# Production Session will be reconfigured in db_connection fixture
 
 
 @pytest.fixture(scope="session")
@@ -112,41 +113,36 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
     """AsyncEngine for test database.
 
     Session-scoped engine shared across all tests.
+    Creates engine directly without using production setup to avoid
+    potential event loop issues with CConnection initialization.
 
     Note: Database migrations must be applied before running tests.
     Locally run: alembic upgrade head
 
-    Pattern from intern-contest-cabinet with disabled statement caching to prevent
-    event loop attachment issues when reusing connections from pool.
+    Pattern from statements/tests/fixtures/db.py
     """
-    # Create PostgreSQL connection URL with asyncpg
-    db_url = test_settings.DATABASE_URL
+    # Import custom dialect to ensure it's registered
+    import bot.db.dialect  # noqa: F401
 
-    # Disable statement caching to prevent event loop attachment issues
-    # Pattern from intern-contest-cabinet project
+    from bot.db.dialect import CConnection
+
     connect_args = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
+        "connection_class": CConnection,
     }
 
-    # Pool settings from intern-contest-cabinet project
-    # pool_recycle is critical to prevent stale connections and event loop issues
+    # Create engine directly
     engine = create_async_engine(
-        db_url,
-        echo=False,  # Set to True for SQL debugging
-        pool_timeout=30,  # Seconds to wait for connection from pool
-        pool_size=3,  # Number of connections to keep in pool
-        pool_recycle=3600,  # Recycle connections after 1 hour
-        pool_pre_ping=False,  # Matches intern-contest-cabinet settings
-        max_overflow=2,  # Maximum overflow connections
+        test_settings.DATABASE_URL,
+        echo=False,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=3600,
+        pool_pre_ping=False,
         connect_args=connect_args,
     )
-
-    # Configure global Session with engine first
-    # Pattern from intern-contest-cabinet project - Session is configured twice:
-    # 1. With engine here
-    # 2. With connection in db_connection fixture
-    Session.configure(bind=engine)
 
     yield engine
 
@@ -161,16 +157,17 @@ async def db_connection(
     """AsyncConnection for test database.
 
     Session-scoped connection reconfigured for test isolation.
-    Uses pattern from intern-contest-cabinet with Session.configure().
+    Pattern from statements/tests/fixtures/db.py
     """
     async with db_engine.connect() as connection:
         # Reconfigure global Session to use connection instead of engine
-        Session.configure(bind=connection)
+        # This is critical for test isolation via transactions
+        db.Session.configure(bind=connection)
 
         yield connection
 
-        # Restore Session to use engine
-        Session.configure(bind=db_engine)
+        # Restore Session to use engine after tests
+        db.Session.configure(bind=db_engine)
 
 
 @pytest.fixture(scope="function")
@@ -187,31 +184,43 @@ async def db_transaction(db_connection: AsyncConnection) -> AsyncGenerator[None,
 
 @pytest.fixture(scope="function")
 async def db_savepoint(
-    db_transaction: None,
+    db_transaction: None, db_connection: AsyncConnection
 ) -> AsyncGenerator[None, None]:
-    """Savepoint fixture for compatibility.
+    """Savepoint with automatic recreation after commit.
 
-    Note: In async SQLAlchemy with asyncpg, nested transactions (savepoints)
-    work differently than in sync mode. For test isolation, we rely on
-    the db_transaction fixture which provides automatic rollback.
+    This fixture creates a SAVEPOINT and registers an event listener
+    that automatically recreates the savepoint after each transaction end.
+    This allows fixture code to use commit() while maintaining test isolation.
 
-    This fixture is kept for API compatibility but doesn't create
-    an actual savepoint. Tests should use db_session.flush() instead
-    of db_session.commit() for better control, or accept that commit()
-    will work within the transaction context.
+    Pattern from intern-contest-cabinet project for compatibility with fixture commits.
+    Event listener is called synchronously, so it uses sync_connection.
     """
+    savepoint: (
+        sa.ext.asyncio.AsyncTransaction | sa.engine.NestedTransaction
+    ) = await db_connection.begin_nested()
+
+    def on_release_savepoint(session, tx):
+        nonlocal savepoint
+        if not savepoint.is_active:
+            # Event listener is called synchronously, use sync_connection
+            savepoint = db_connection.sync_connection.begin_nested()
+
+    sa.event.listen(sa.orm.Session, "after_transaction_end", on_release_savepoint)
     yield
+    sa.event.remove(sa.orm.Session, "after_transaction_end", on_release_savepoint)
 
 
 @pytest.fixture(scope="function")
 def db_sessionmaker(db_savepoint: None) -> async_sessionmaker[AsyncSession]:
     """Session factory for tests.
 
-    Returns global test Session configured to use test connection.
+    Returns global Session configured to use test connection.
     The connection is already in a transaction with savepoint (db_savepoint).
     Savepoints are automatically recreated after commits via event listener.
+
+    Pattern from statements/ - use production Session
     """
-    return Session
+    return db.Session
 
 
 @pytest.fixture(scope="function")
@@ -246,7 +255,9 @@ async def test_database(test_settings: Settings) -> AsyncGenerator[Database, Non
 
 
 @pytest.fixture
-def test_database_adapter(db_session: AsyncSession):
+async def test_database_adapter(
+    db_session: AsyncSession,
+) -> "DatabasesAdapter":  # type: ignore[name-defined]
     """databases.Database-compatible adapter using db_session.
 
     This fixture provides a databases.Database-compatible interface

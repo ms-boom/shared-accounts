@@ -1,19 +1,19 @@
-"""Unit tests for bot/db/repositories/chat_session_repository.py."""
+"""Integration tests for bot/db/repositories/chat_session_repository.py."""
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
-from tests.adapters import DatabasesAdapter
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestChatSessionRepository:
     """Tests for ChatSessionRepository."""
 
     @pytest.fixture
-    def chat_session_repo(self, test_database_adapter: DatabasesAdapter):
+    async def chat_session_repo(self, db_session: AsyncSession):
         """Create ChatSessionRepository instance for testing."""
-        return ChatSessionRepository(test_database_adapter)
+        return ChatSessionRepository(db_session)
 
     async def test_create_session_with_default_thread_id(
         self, chat_session_repo: ChatSessionRepository

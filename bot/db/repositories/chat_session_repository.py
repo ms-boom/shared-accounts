@@ -1,30 +1,49 @@
-"""Repository for ChatSession model database operations."""
+"""Repository for ChatSession model database operations.
+
+Pattern from statements/ - repository accepts session, doesn't manage transactions.
+"""
 
 import logging
 from datetime import datetime
 
-from databases import Database
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
+from bot.db.models import ChatSession
 
 logger = logging.getLogger(__name__)
 
 
-class ChatSessionRepository:
-    """Repository pattern for ChatSession model operations."""
+def _row_to_dict(session: ChatSession) -> dict:
+    """Convert ChatSession model to dict for backward compatibility."""
+    return {
+        "chat_id": session.chat_id,
+        "thread_id": session.thread_id,
+        "email": session.email,
+        "session_path": session.session_path,
+        "created_at": session.created_at,
+        "last_used": session.last_used,
+    }
 
-    def __init__(self, database: Database):
-        """
-        Initialize repository.
+
+class ChatSessionRepository:
+    """Repository pattern for ChatSession model operations.
+
+    Pattern from statements/ - accepts session, uses flush() not commit().
+    Transaction management is handled by caller (use case or test).
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with session injection.
 
         Args:
-            database: Database connection instance
+            session: SQLAlchemy async session
         """
-        self.db = database
+        self.session = session
 
     async def get_by_chat_id(self, chat_id: int, thread_id: int = 0) -> dict | None:
-        """
-        Get chat session by chat_id and thread_id.
+        """Get chat session by chat_id and thread_id.
 
         Args:
             chat_id: Telegram chat_id
@@ -36,16 +55,13 @@ class ChatSessionRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT chat_id, thread_id, email, session_path, created_at, last_used
-            FROM chat_sessions
-            WHERE chat_id = :chat_id AND thread_id = :thread_id
-        """
         try:
-            result = await self.db.fetch_one(
-                query, {"chat_id": chat_id, "thread_id": thread_id}
+            stmt = sa.select(ChatSession).where(
+                ChatSession.chat_id == chat_id, ChatSession.thread_id == thread_id
             )
-            return dict(result) if result else None
+            result = await self.session.execute(stmt)
+            session_obj = result.scalar_one_or_none()
+            return _row_to_dict(session_obj) if session_obj else None
         except Exception as e:
             logger.error(f"Failed to get chat session for {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to get chat session: {e}") from e
@@ -72,24 +88,18 @@ class ChatSessionRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            INSERT INTO chat_sessions (chat_id, thread_id, email, session_path, created_at)
-            VALUES (:chat_id, :thread_id, :email, :session_path, :created_at)
-            RETURNING chat_id, thread_id, email, session_path, created_at, last_used
-        """
-        now = datetime.utcnow()
-        values = {
-            "chat_id": chat_id,
-            "thread_id": thread_id,
-            "email": email,
-            "session_path": session_path,
-            "created_at": now,
-        }
-
         try:
-            result = await self.db.fetch_one(query, values)
+            session_obj = ChatSession(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                email=email,
+                session_path=session_path,
+                created_at=datetime.utcnow(),
+            )
+            self.session.add(session_obj)
+            await self.session.flush()  # Not commit - transaction managed by caller
             logger.info(f"Created chat session for {chat_id}/{thread_id} ({email})")
-            return dict(result) if result else values
+            return _row_to_dict(session_obj)
         except Exception as e:
             logger.error(
                 f"Failed to create chat session for {chat_id}/{thread_id}: {e}"
@@ -110,23 +120,24 @@ class ChatSessionRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            UPDATE chat_sessions
-            SET last_used = :last_used
-            WHERE chat_id = :chat_id AND thread_id = :thread_id
-            RETURNING chat_id, thread_id, email, session_path, created_at, last_used
-        """
-        values = {
-            "chat_id": chat_id,
-            "thread_id": thread_id,
-            "last_used": datetime.utcnow(),
-        }
-
         try:
-            result = await self.db.fetch_one(query, values)
-            if result:
+            stmt = (
+                sa.update(ChatSession)
+                .where(
+                    ChatSession.chat_id == chat_id,
+                    ChatSession.thread_id == thread_id,
+                )
+                .values(last_used=datetime.utcnow())
+                .returning(ChatSession)
+            )
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            session_obj = result.scalar_one_or_none()
+
+            if session_obj:
                 logger.info(f"Updated last_used for chat session {chat_id}/{thread_id}")
-            return dict(result) if result else None
+                return _row_to_dict(session_obj)
+            return None
         except Exception as e:
             logger.error(f"Failed to update last_used for {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to update last_used: {e}") from e
@@ -145,12 +156,13 @@ class ChatSessionRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            DELETE FROM chat_sessions
-            WHERE chat_id = :chat_id AND thread_id = :thread_id
-        """
         try:
-            await self.db.execute(query, {"chat_id": chat_id, "thread_id": thread_id})
+            stmt = sa.delete(ChatSession).where(
+                ChatSession.chat_id == chat_id,
+                ChatSession.thread_id == thread_id,
+            )
+            await self.session.execute(stmt)
+            await self.session.flush()
             logger.info(f"Deleted chat session for {chat_id}/{thread_id}")
             return True
         except Exception as e:
@@ -181,28 +193,31 @@ class ChatSessionRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            INSERT INTO chat_sessions (chat_id, thread_id, email, session_path, created_at)
-            VALUES (:chat_id, :thread_id, :email, :session_path, :created_at)
-            ON CONFLICT (chat_id, thread_id)
-            DO UPDATE SET
-                email = EXCLUDED.email,
-                session_path = EXCLUDED.session_path
-            RETURNING chat_id, thread_id, email, session_path, created_at, last_used
-        """
-        now = datetime.utcnow()
-        values = {
-            "chat_id": chat_id,
-            "thread_id": thread_id,
-            "email": email,
-            "session_path": session_path,
-            "created_at": now,
-        }
-
         try:
-            result = await self.db.fetch_one(query, values)
+            # PostgreSQL INSERT ... ON CONFLICT
+            stmt = sa.dialects.postgresql.insert(ChatSession).values(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                email=email,
+                session_path=session_path,
+                created_at=datetime.utcnow(),
+            )
+
+            # ON CONFLICT ... DO UPDATE
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["chat_id", "thread_id"],
+                set_={
+                    "email": stmt.excluded.email,
+                    "session_path": stmt.excluded.session_path,
+                },
+            ).returning(ChatSession)
+
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            session_obj = result.scalar_one()
+
             logger.info(f"Upserted chat session for {chat_id}/{thread_id} ({email})")
-            return dict(result) if result else values
+            return _row_to_dict(session_obj)
         except Exception as e:
             logger.error(
                 f"Failed to upsert chat session for {chat_id}/{thread_id}: {e}"
@@ -227,17 +242,18 @@ class ChatSessionRepository:
             Must be called within a transaction.
             Other transactions will wait or skip (SKIP LOCKED) this row.
         """
-        query = """
-            SELECT chat_id, thread_id, email, session_path, created_at, last_used
-            FROM chat_sessions
-            WHERE chat_id = :chat_id AND thread_id = :thread_id
-            FOR UPDATE
-        """
         try:
-            result = await self.db.fetch_one(
-                query, {"chat_id": chat_id, "thread_id": thread_id}
+            stmt = (
+                sa.select(ChatSession)
+                .where(
+                    ChatSession.chat_id == chat_id,
+                    ChatSession.thread_id == thread_id,
+                )
+                .with_for_update()
             )
-            return dict(result) if result else None
+            result = await self.session.execute(stmt)
+            session_obj = result.scalar_one_or_none()
+            return _row_to_dict(session_obj) if session_obj else None
         except Exception as e:
             logger.error(f"Failed to lock chat session {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to lock chat session: {e}") from e
@@ -252,14 +268,14 @@ class ChatSessionRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT chat_id, thread_id, email, session_path, created_at, last_used
-            FROM chat_sessions
-            ORDER BY last_used DESC NULLS LAST, created_at DESC
-        """
         try:
-            results = await self.db.fetch_all(query)
-            return [dict(row) for row in results]
+            stmt = sa.select(ChatSession).order_by(
+                ChatSession.last_used.desc().nulls_last(),
+                ChatSession.created_at.desc(),
+            )
+            result = await self.session.execute(stmt)
+            sessions = result.scalars().all()
+            return [_row_to_dict(session) for session in sessions]
         except Exception as e:
             logger.error(f"Failed to get all chat sessions: {e}")
             raise DatabaseError(f"Failed to get all chat sessions: {e}") from e

@@ -67,3 +67,4 @@ dmypy.json
 # Bot specific
 bot.db
 *.session
+.python-version
