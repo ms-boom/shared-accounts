@@ -163,7 +163,9 @@ class ChatSession(Base):
 
     def __repr__(self) -> str:
         thread_str = f", thread_id={self.thread_id}" if self.thread_id else ""
-        return f"<ChatSession(chat_id={self.chat_id}{thread_str}, email='{self.email}')>"
+        return (
+            f"<ChatSession(chat_id={self.chat_id}{thread_str}, email='{self.email}')>"
+        )
 
 
 class Task(Base):

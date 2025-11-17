@@ -22,9 +22,7 @@ class ChatSessionRepository:
         """
         self.db = database
 
-    async def get_by_chat_id(
-        self, chat_id: int, thread_id: int = 0
-    ) -> dict | None:
+    async def get_by_chat_id(self, chat_id: int, thread_id: int = 0) -> dict | None:
         """
         Get chat session by chat_id and thread_id.
 
@@ -49,9 +47,7 @@ class ChatSessionRepository:
             )
             return dict(result) if result else None
         except Exception as e:
-            logger.error(
-                f"Failed to get chat session for {chat_id}/{thread_id}: {e}"
-            )
+            logger.error(f"Failed to get chat session for {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to get chat session: {e}") from e
 
     async def create(
@@ -95,12 +91,12 @@ class ChatSessionRepository:
             logger.info(f"Created chat session for {chat_id}/{thread_id} ({email})")
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to create chat session for {chat_id}/{thread_id}: {e}")
+            logger.error(
+                f"Failed to create chat session for {chat_id}/{thread_id}: {e}"
+            )
             raise DatabaseError(f"Failed to create chat session: {e}") from e
 
-    async def update_last_used(
-        self, chat_id: int, thread_id: int = 0
-    ) -> dict | None:
+    async def update_last_used(self, chat_id: int, thread_id: int = 0) -> dict | None:
         """
         Update last_used timestamp for a chat session.
 
@@ -158,7 +154,9 @@ class ChatSessionRepository:
             logger.info(f"Deleted chat session for {chat_id}/{thread_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete chat session for {chat_id}/{thread_id}: {e}")
+            logger.error(
+                f"Failed to delete chat session for {chat_id}/{thread_id}: {e}"
+            )
             raise DatabaseError(f"Failed to delete chat session: {e}") from e
 
     async def upsert(
@@ -206,12 +204,12 @@ class ChatSessionRepository:
             logger.info(f"Upserted chat session for {chat_id}/{thread_id} ({email})")
             return dict(result) if result else values
         except Exception as e:
-            logger.error(f"Failed to upsert chat session for {chat_id}/{thread_id}: {e}")
+            logger.error(
+                f"Failed to upsert chat session for {chat_id}/{thread_id}: {e}"
+            )
             raise DatabaseError(f"Failed to upsert chat session: {e}") from e
 
-    async def lock_for_update(
-        self, chat_id: int, thread_id: int = 0
-    ) -> dict | None:
+    async def lock_for_update(self, chat_id: int, thread_id: int = 0) -> dict | None:
         """
         Lock chat session for update (prevents concurrent initialization).
 

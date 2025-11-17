@@ -143,17 +143,23 @@ class PlaywrightService:
             )
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout during session init for chat {chat_id}/{thread_id}: {e}")
+            logger.error(
+                f"Timeout during session init for chat {chat_id}/{thread_id}: {e}"
+            )
             # Save error screenshot
             if page:
-                screenshot_path = self.settings.ERROR_DIR / f"init_{chat_id}_{thread_id}.png"
+                screenshot_path = (
+                    self.settings.ERROR_DIR / f"init_{chat_id}_{thread_id}.png"
+                )
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=str(screenshot_path))
             raise BrowserError(
                 "❌ Operation timed out. The page took too long to respond."
             ) from e
         except Exception as e:
-            logger.error(f"Failed to initialize session for chat {chat_id}/{thread_id}: {e}")
+            logger.error(
+                f"Failed to initialize session for chat {chat_id}/{thread_id}: {e}"
+            )
             raise BrowserError(f"❌ Failed to initialize session: {str(e)}") from e
         finally:
             if context:
@@ -218,14 +224,18 @@ class PlaywrightService:
         except PlaywrightTimeoutError as e:
             logger.error(f"Timeout during login for chat {chat_id}/{thread_id}: {e}")
             if page:
-                screenshot_path = self.settings.ERROR_DIR / f"login_{chat_id}_{thread_id}.png"
+                screenshot_path = (
+                    self.settings.ERROR_DIR / f"login_{chat_id}_{thread_id}.png"
+                )
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=str(screenshot_path))
             raise BrowserError(
                 "❌ Login link is invalid or expired. Please run /init_session again."
             ) from e
         except Exception as e:
-            logger.error(f"Failed to process login link for chat {chat_id}/{thread_id}: {e}")
+            logger.error(
+                f"Failed to process login link for chat {chat_id}/{thread_id}: {e}"
+            )
             raise BrowserError(f"❌ Failed to process login link: {str(e)}") from e
         finally:
             if context:
@@ -325,7 +335,9 @@ class PlaywrightService:
         except PlaywrightTimeoutError as e:
             logger.error(f"Timeout extracting code for chat {chat_id}/{thread_id}: {e}")
             if page:
-                screenshot_path = self.settings.ERROR_DIR / f"extract_{chat_id}_{thread_id}.png"
+                screenshot_path = (
+                    self.settings.ERROR_DIR / f"extract_{chat_id}_{thread_id}.png"
+                )
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=str(screenshot_path))
             raise BrowserError(
