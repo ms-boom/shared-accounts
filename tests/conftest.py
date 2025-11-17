@@ -9,7 +9,8 @@ from uuid import uuid4
 
 import pytest
 from aiogram import Bot
-from aiogram.types import Chat, ChatMember, User
+from aiogram.enums import ChatMemberStatus
+from aiogram.types import Chat, ChatMemberAdministrator, ChatMemberMember, User
 from databases import Database
 from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -82,28 +83,34 @@ async def test_database(test_settings: Settings) -> AsyncIterator[Database]:
     engine = create_async_engine(test_settings.DATABASE_URL, echo=False)
 
     # For SQLite, replace JSONB with JSON (SQLite-compatible)
+    # NOTE: This is a test-only workaround. Production uses PostgreSQL exclusively.
     if "sqlite" in test_settings.DATABASE_URL:
-        # Get tasks table from metadata
+        original_types: dict[str, Any] = {}
+
+        # Adapt tasks.payload column
         tasks_table = Base.metadata.tables.get("tasks")
         if tasks_table is not None:
-            # Store original type for restoration
             payload_column = tasks_table.c.payload
-            original_type = payload_column.type
-
-            # Replace JSONB with JSON for SQLite
+            original_types["tasks.payload"] = payload_column.type
             payload_column.type = JSON()
 
-            try:
-                # Create all tables from models
-                async with engine.begin() as conn:
-                    await conn.run_sync(Base.metadata.create_all)
-            finally:
-                # Restore original type
-                payload_column.type = original_type
-        else:
-            # Fallback if tasks table not found
+        # Adapt fsm_states.data column
+        fsm_states_table = Base.metadata.tables.get("fsm_states")
+        if fsm_states_table is not None:
+            data_column = fsm_states_table.c.data
+            original_types["fsm_states.data"] = data_column.type
+            data_column.type = JSON()
+
+        try:
+            # Create all tables from models
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+        finally:
+            # Restore original types
+            if tasks_table is not None and "tasks.payload" in original_types:
+                tasks_table.c.payload.type = original_types["tasks.payload"]
+            if fsm_states_table is not None and "fsm_states.data" in original_types:
+                fsm_states_table.c.data.type = original_types["fsm_states.data"]
     else:
         # For PostgreSQL, use original models
         async with engine.begin() as conn:
@@ -173,38 +180,53 @@ def telegram_chat() -> Chat:
 
 
 @pytest.fixture
-def admin_chat_member(telegram_user: User, telegram_chat: Chat) -> ChatMember:
+def admin_chat_member(telegram_user: User) -> ChatMemberAdministrator:
     """
-    Create admin ChatMember.
+    Create admin ChatMemberAdministrator.
 
     Args:
         telegram_user: Telegram user fixture
-        telegram_chat: Telegram chat fixture
 
     Returns:
-        ChatMember with admin status
+        ChatMemberAdministrator with admin permissions
     """
-    return ChatMember(
+    return ChatMemberAdministrator(
         user=telegram_user,
-        status="administrator",
+        status=ChatMemberStatus.ADMINISTRATOR,
+        can_be_edited=False,
+        is_anonymous=False,
+        can_manage_chat=True,
+        can_delete_messages=True,
+        can_manage_video_chats=True,
+        can_restrict_members=True,
+        can_promote_members=False,
+        can_change_info=True,
+        can_invite_users=True,
+        can_post_stories=False,
+        can_edit_stories=False,
+        can_delete_stories=False,
+        can_post_messages=None,
+        can_edit_messages=None,
+        can_pin_messages=True,
+        can_manage_topics=True,
+        can_manage_direct_messages=False,
     )
 
 
 @pytest.fixture
-def regular_chat_member(telegram_user: User, telegram_chat: Chat) -> ChatMember:
+def regular_chat_member(telegram_user: User) -> ChatMemberMember:
     """
-    Create regular ChatMember.
+    Create regular ChatMemberMember.
 
     Args:
         telegram_user: Telegram user fixture
-        telegram_chat: Telegram chat fixture
 
     Returns:
-        ChatMember with member status
+        ChatMemberMember with member status
     """
-    return ChatMember(
+    return ChatMemberMember(
         user=telegram_user,
-        status="member",
+        status=ChatMemberStatus.MEMBER,
     )
 
 
