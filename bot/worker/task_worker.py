@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from uuid import UUID
 
 from aiogram import Bot
 from databases import Database
@@ -92,7 +93,7 @@ class TaskWorker:
         Args:
             task: Task data from database
         """
-        task_id = task["id"]
+        task_id: UUID = task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
         task_type = task["task_type"]
         chat_id = task["chat_id"]
         payload = task["payload"]
@@ -128,7 +129,7 @@ class TaskWorker:
 
     async def process_init_session(
         self,
-        task_id: str,
+        task_id: UUID,
         chat_id: int,
         payload: dict,
     ) -> None:
@@ -162,7 +163,7 @@ class TaskWorker:
 
     async def process_login_link(
         self,
-        task_id: str,
+        task_id: UUID,
         chat_id: int,
         payload: dict,
     ) -> None:
@@ -189,7 +190,7 @@ class TaskWorker:
 
     async def process_get_code(
         self,
-        task_id: str,
+        task_id: UUID,
         chat_id: int,
         payload: dict,
     ) -> None:

@@ -91,8 +91,10 @@ class TaskRepository:
 
         try:
             result = await self.db.fetch_one(query, values)
+            if result is None:
+                raise DatabaseError("INSERT RETURNING returned None")
             logger.info(f"Created task {result['id']} for chat {chat_id}")
-            return dict(result) if result else values
+            return dict(result)
         except Exception as e:
             logger.error(f"Failed to create task for chat {chat_id}: {e}")
             raise DatabaseError(f"Failed to create task: {e}") from e

@@ -23,13 +23,14 @@ from bot.services.user_service import UserService
 logger = logging.getLogger(__name__)
 
 
-async def on_startup(bot: Bot, database: Database) -> None:
+async def on_startup(bot: Bot, database: Database, debug: bool = False) -> None:
     """
     Execute on bot startup.
 
     Args:
         bot: Bot instance
         database: Database instance
+        debug: Debug mode flag
     """
     logger.info("Bot starting up...")
 
@@ -37,7 +38,7 @@ async def on_startup(bot: Bot, database: Database) -> None:
     await database.startup()
 
     # Create tables (WARNING: Use migrations in production!)
-    if bot.parse_mode:  # Just checking if we're in development
+    if debug:
         logger.warning("Creating database tables (development mode)")
         await database.create_tables()
 
@@ -111,7 +112,7 @@ async def main() -> None:
     dp.include_router(group_admin.router)
 
     # Startup
-    await on_startup(bot, database)
+    await on_startup(bot, database, settings.DEBUG)
 
     try:
         # Start polling

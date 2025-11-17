@@ -47,14 +47,17 @@ async def main() -> None:
     # Handle graceful shutdown
     stop_event = asyncio.Event()
 
-    def signal_handler(sig):
+    def signal_handler(sig: int) -> None:
         logger.info(f"Received signal {sig}, shutting down...")
         stop_event.set()
+
+    def make_signal_handler(sig: int):
+        return lambda: signal_handler(sig)
 
     # Register signal handlers
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
+        loop.add_signal_handler(sig, make_signal_handler(sig))
 
     try:
         # Run worker until signal received
