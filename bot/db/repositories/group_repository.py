@@ -6,7 +6,6 @@ from datetime import datetime
 from databases import Database
 
 from bot.core.exceptions import DatabaseError, GroupNotFoundError
-from bot.db.models import Group
 
 logger = logging.getLogger(__name__)
 

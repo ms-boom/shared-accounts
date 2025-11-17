@@ -27,7 +27,9 @@ async def start_handler(message: Message) -> None:
         "Я бот-шаблон для работы с группами Telegram.\n"
         "Используй /help чтобы узнать доступные команды."
     )
-    logger.info(f"User {message.from_user.id if message.from_user else 'unknown'} started the bot")
+    logger.info(
+        f"User {message.from_user.id if message.from_user else 'unknown'} started the bot"
+    )
 
 
 @router.message(Command("help"))
@@ -61,4 +63,6 @@ async def help_handler(message: Message) -> None:
     help_text += "\n<i>Это шаблон бота. Добавьте свои команды и функциональность!</i>"
 
     await message.reply(help_text, parse_mode="HTML")
-    logger.info(f"Help requested by user {message.from_user.id if message.from_user else 'unknown'}")
+    logger.info(
+        f"Help requested by user {message.from_user.id if message.from_user else 'unknown'}"
+    )

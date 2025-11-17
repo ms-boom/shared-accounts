@@ -1,7 +1,8 @@
 """Global error handling middleware."""
 
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Update
@@ -44,9 +45,7 @@ class ErrorHandlerMiddleware(BaseMiddleware):
         except Exception as e:
             # Unknown errors - log with stack trace
             logger.exception(f"Unexpected error: {e}")
-            await self._send_error_message(
-                event, "Произошла ошибка. Попробуйте позже."
-            )
+            await self._send_error_message(event, "Произошла ошибка. Попробуйте позже.")
         return None
 
     async def _send_error_message(self, event: TelegramObject, message: str) -> None:

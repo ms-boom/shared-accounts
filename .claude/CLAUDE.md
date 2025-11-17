@@ -16,4 +16,3 @@
 - Стиль программирования Функциональной ясности: @01-style-guide-functuonal-clearance.md
 - Как работать с любой задачей: @02-analyze-your-solution.md
 - Описанией уровней разработчиков (Junior, Middle, Senior): @03-developer-levels.md
-

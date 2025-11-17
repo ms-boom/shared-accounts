@@ -2,7 +2,6 @@
 
 import logging
 import re
-from typing import Any
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -12,7 +11,6 @@ from databases import Database
 from bot.core.config import Settings
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
 from bot.db.repositories.task_repository import TaskRepository
-from bot.filters.is_group_admin import IsGroupAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +85,18 @@ async def init_session_handler(
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.reply("❌ Please provide an email address.\n\nUsage: /init_session user@example.com")
+        await message.reply(
+            "❌ Please provide an email address.\n\nUsage: /init_session user@example.com"
+        )
         return
 
     email = parts[1].strip()
 
     # Validate email
     if not validate_email(email):
-        await message.reply("❌ Invalid email format. Please provide a valid email address.")
+        await message.reply(
+            "❌ Invalid email format. Please provide a valid email address."
+        )
         return
 
     # Check for existing session
@@ -125,9 +127,7 @@ async def init_session_handler(
         "Please wait for the authorization link request..."
     )
 
-    logger.info(
-        f"Created init_session task {task['id']} for chat {message.chat.id}"
-    )
+    logger.info(f"Created init_session task {task['id']} for chat {message.chat.id}")
 
 
 @router.message(Command("get_code"))
@@ -192,9 +192,7 @@ async def get_code_handler(
 
     await message.reply("🔄 Extracting authorization code...")
 
-    logger.info(
-        f"Created get_code task {task['id']} for chat {message.chat.id}"
-    )
+    logger.info(f"Created get_code task {task['id']} for chat {message.chat.id}")
 
 
 @router.message(Command("health"))
@@ -285,10 +283,10 @@ async def handle_claude_url(
     # Find recent init_session task that's processing
     init_task = None
     for task in recent_tasks:
-        if (
-            task["task_type"] == "init_session"
-            and task["status"] in ["pending", "processing"]
-        ):
+        if task["task_type"] == "init_session" and task["status"] in [
+            "pending",
+            "processing",
+        ]:
             init_task = task
             break
 
