@@ -153,12 +153,15 @@
 | `/get_code` вызван без инициализированной сессии | **Bot:** `❌ No active session found for this chat. Run /init_session <email> first.` |
 | Неверный формат email при `/init_session` | **Bot:** `❌ Invalid email format. Please provide a valid email address.` |
 | Неверный формат URL при `/get_code` | **Bot:** `❌ Invalid auth URL format. Please provide a valid Claude authorization URL.` |
+| `/init_session` вызван не-администратором группы | **Bot:** `❌ Only group administrators can initialize sessions. Please contact your group admin.` |
+| Параллельная инициализация сессии (два админа одновременно `/init_session`) | Первый запрос захватывает блокировку (PostgreSQL row lock), второй ждет завершения первого или получает: `⚠️ Session initialization already in progress. Please wait...` |
 | Авторизационная ссылка устарела/невалидна | **Bot:** `❌ Authorization link is invalid or expired. Please run /init_session <email> again.` + задача помечена failed |
 | Сетевая ошибка при загрузке страницы | **Bot:** `⚠️ Network error. Retrying... (attempt X/3)` → автоматические повторы с задержками 2s, 4s, 8s |
 | Сетевая ошибка после 3 попыток | **Bot:** `❌ Network error persists after 3 attempts. Please try again later.` + полный лог ошибки в файл |
 | Таймаут при ожидании элемента на странице (>30s) | **Bot:** `❌ Operation timed out. The page took too long to respond.` + скриншот страницы сохранен в `/data/errors/{task_id}.png` |
 | Повторный `/init_session` для чата с активной сессией | **Bot:** `⚠️ Session already exists for this chat (email: existing@example.com). Do you want to replace it with user@example.com? Reply 'yes' to confirm.` |
-| Браузерная сессия не найдена на диске (файлы повреждены) | **Bot:** `❌ Session file corrupted or missing. Please run /init_session <email> again.` + запись об ошибке удалена из БД |
+| Браузерная сессия не найдена на диске (файлы повреждены) | **Bot:** `❌ Session file corrupted or missing. Please run /init_session <email> again.` + запись удалена из БД |
+| Сессия устарела/невалидна при `/get_code` (401/403 ошибка) | **Bot:** `❌ Session expired or invalid. Please run /init_session <email> again to re-authenticate.` + сессия помечена как expired в БД + файлы сессии удаляются |
 | Несколько одновременных запросов `/get_code` от разных пользователей | Обрабатываются через очередь PostgreSQL последовательно с `SELECT FOR UPDATE SKIP LOCKED`, каждый пользователь получает свой код в порядке очереди |
 | Worker service недоступен/упал | Задачи накапливаются в БД очереди со статусом `pending`, обрабатываются автоматически при восстановлении worker'а |
 | Playwright не может найти элемент с кодом на странице | **Bot:** `❌ Could not extract authorization code. Page structure may have changed.` + скриншот страницы сохранен для отладки |
@@ -196,6 +199,8 @@
 - [ ] Невалидные/устаревшие ссылки детектируются и сообщаются пользователю с инструкцией
 - [ ] Скриншоты страницы сохраняются в `/data/errors/{task_id}.png` при критических ошибках (timeout, extraction failed)
 - [ ] Отсутствие сессии при `/get_code` возвращает понятную инструкцию о необходимости `/init_session`
+- [ ] **Session Expiration:** При ошибках аутентификации (401/403) во время `/get_code` бот детектирует устаревшую сессию и сообщает пользователю о необходимости переинициализации
+- [ ] **Session Cleanup:** Устаревшие/невалидные сессии автоматически удаляются из файловой системы и помечаются expired в БД при детектировании ошибок
 - [ ] Невалидный формат email при `/init_session` возвращает ошибку до создания задачи
 - [ ] Невалидный формат URL при `/get_code` возвращает ошибку до создания задачи
 - [ ] При падении worker'а задачи не теряются и обрабатываются после восстановления
@@ -208,10 +213,15 @@
 - [ ] Очередь корректно обрабатывается при нескольких параллельных workers (`SKIP LOCKED` работает)
 - [ ] Foreign key constraint от tasks.chat_id к chat_sessions.chat_id (optional, но желательно)
 
-### ✅ Must Have - Security
+### ✅ Must Have - Security & Access Control
 
 - [ ] Browser profile directories имеют права доступа `700` (owner-only read/write/execute)
 - [ ] Разные chat_id не могут получить доступ к сессиям друг друга (проверка chat_id при загрузке)
+- [ ] **Access Control:** `/init_session` доступен только администраторам группы (проверка через Telegram API `getChatMember`)
+- [ ] В приватных чатах `/init_session` доступен любому пользователю (т.к. пользователь сам владелец приватного чата)
+- [ ] `/get_code` доступен всем участникам группы (не требует прав администратора)
+- [ ] **Concurrency Control:** Инициализация сессии защищена от параллельного выполнения через PostgreSQL row-level locking (`SELECT FOR UPDATE` на chat_sessions)
+- [ ] При попытке параллельной инициализации второй запрос либо ждет завершения первого, либо получает понятное сообщение
 - [ ] Чувствительные данные (authorization codes, email) не логируются в plaintext
 - [ ] Database credentials передаются через environment variables, не хардкодятся
 - [ ] Telegram bot token передается через environment variable
@@ -370,48 +380,70 @@ LIMIT 1;
    Точные CSS selectors для элемента с authorization code нужно определить после исследования актуальной структуры страницы `https://claude.ai/auth/authorize`.
    **Action:** Провести manual inspection страницы для определения селекторов.
 
-2. **Session expiration detection:**
-   Как определить, что сессия устарела? Нужно ли делать periodic health check сессий?
-   **Options:**
-   - Проверять при каждом `/get_code` и переинициализировать при ошибке
-   - Отдельный background job проверяет все сессии раз в N часов
+### ✅ Resolved Questions
 
-3. **Access control в private chats:**
-   Текущая спецификация: "anyone who starts chat can use bot". Нужен ли whitelist пользователей по user_id?
-   **Recommendation:** Начать без whitelist, добавить позже при необходимости.
+2. **Session lifetime & expiration:** ✅ RESOLVED
+   - Сессия живет пока может (без принудительного истечения)
+   - При ошибках использования (401/403) детектируется устаревшая сессия
+   - Пользователю возвращается инструкция о необходимости переинициализации через `/init_session`
+   - Устаревшие сессии автоматически удаляются при детектировании ошибок
 
-4. **Session replacement confirmation:**
-   При повторном `/init_session` требовать ли явное подтверждение от пользователя перед заменой сессии?
-   **Proposed:** Да, запрашивать confirmation через inline keyboard или текстовое "yes".
+3. **Access control:** ✅ RESOLVED
+   - `/init_session` доступен только администраторам группы (проверка через Telegram API)
+   - В приватных чатах доступен любому пользователю
+   - `/get_code` доступен всем участникам группы
+
+4. **Concurrency control:** ✅ RESOLVED
+   - Инициализация сессии защищена от параллельного выполнения через PostgreSQL row-level locking
+   - При параллельных запросах второй ждет завершения первого или получает сообщение о процессе
+
+5. **Session cleanup strategy:** ✅ RESOLVED
+   - Автоматически при попытке использования устаревшей сессии (детектирование 401/403 ошибок)
+   - Вручную через админскую команду `/cleanup` (будет добавлена в будущем)
 
 ### 💡 Future Enhancements (Not in MVP)
 
-1. **Auto-detect expired sessions**
-   Периодическая проверка валидности сохраненных сессий, уведомление пользователей об истечении.
+1. **Admin command: `/cleanup`** (Priority: High)
+   - Ручное удаление старых/неиспользуемых сессий
+   - Синтаксис: `/cleanup [days]` — удаление сессий неактивных N дней
+   - Синтаксис: `/cleanup all` — удаление всех сессий для текущего чата
+   - Доступ: только администраторы группы
 
-2. **Multi-profile support**
-   Возможность иметь несколько email/сессий на один chat_id (полезно для команд с разными аккаунтами).
+2. **Admin command: `/sessions`**
+   - Список всех активных сессий для текущего чата
+   - Показывает: email, created_at, last_used
+   - Доступ: только администраторы группы
 
-3. **Admin commands:**
-   - `/sessions` — список всех активных сессий с email и last_used
-   - `/cleanup <days>` — удаление сессий неактивных N дней
-   - `/stats` — статистика использования (кол-во запросов, success rate)
+3. **Admin command: `/stats`**
+   - Статистика использования бота для текущего чата
+   - Показывает: кол-во запросов, success rate, среднее время ответа
+   - Доступ: только администраторы группы
 
-4. **Rate limiting:**
-   Предотвращение abuse: ограничение на N запросов `/get_code` в минуту на chat_id.
+4. **Periodic session health check**
+   - Background job проверяет валидность сессий раз в N часов
+   - Уведомляет администраторов о неактивных/expired сессиях
+   - Автоматическое удаление сессий неактивных >30 дней
 
-5. **Webhook mode для Telegram:**
-   Заменить long polling на webhooks для снижения latency и нагрузки.
+5. **Multi-profile support**
+   - Возможность иметь несколько email/сессий на один chat_id
+   - Полезно для команд с разными аккаунтами Claude
+   - Синтаксис: `/init_session <name> <email>`, `/get_code <name> <url>`
 
-6. **Metrics dashboard:**
-   Prometheus + Grafana для мониторинга:
-   - Request volume по командам
-   - Success/failure rate
-   - Average response time
-   - Active sessions count
+6. **Rate limiting:**
+   - Предотвращение abuse: ограничение на N запросов `/get_code` в минуту на chat_id
+   - Настраиваемые лимиты через environment variables
 
-7. **Graceful session cleanup on bot removal:**
-   Детектировать удаление бота из группы → автоматически удалять session и данные для этого chat_id.
+7. **Webhook mode для Telegram:**
+   - Заменить long polling на webhooks для снижения latency и нагрузки
+   - Требует публичный HTTPS endpoint
+
+8. **Metrics dashboard:**
+   - Prometheus + Grafana для мониторинга
+   - Метрики: request volume, success/failure rate, average response time, active sessions count
+
+9. **Graceful session cleanup on bot removal:**
+   - Детектировать удаление бота из группы через Telegram API
+   - Автоматически удалять session и данные для этого chat_id
 
 ---
 
@@ -449,7 +481,10 @@ Design the architecture and implementation plan for this feature following the *
 
 ---
 
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Last Updated:** 2025-11-17
 **Author:** Feature Design Agent
 **Approved By:** [Pending]
+**Changelog:**
+- v1.1 (2025-11-17): Resolved open questions - session lifetime, access control, concurrency, cleanup strategy
+- v1.0 (2025-11-17): Initial feature brief created
