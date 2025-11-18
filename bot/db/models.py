@@ -222,6 +222,12 @@ class Task(Base):
         nullable=True,
         comment="Task result or error message",
     )
+    version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default="1",
+        comment="Version for optimistic locking",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
