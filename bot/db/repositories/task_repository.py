@@ -4,7 +4,7 @@ Pattern from statements/ - repository accepts session, doesn't manage transactio
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +28,7 @@ def _row_to_dict(task: Task) -> dict:
         "payload": task.payload,
         "status": task.status,
         "result": task.result,
+        "version": task.version,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
@@ -115,17 +116,19 @@ class TaskRepository:
         self,
         task_id: UUID,
         status: str,
+        expected_version: int,
         result: str | None = None,
     ) -> dict | None:
-        """Update task status and result.
+        """Update task status and result using optimistic locking.
 
         Args:
             task_id: Task UUID
             status: New status ('processing', 'done', 'failed')
+            expected_version: Expected version for optimistic locking
             result: Task result or error message
 
         Returns:
-            Updated task data as dict or None if not found
+            Updated task data as dict or None if version mismatch (conflict)
 
         Raises:
             DatabaseError: If database operation fails
@@ -133,8 +136,13 @@ class TaskRepository:
         try:
             stmt = (
                 sa.update(Task)
-                .where(Task.id == task_id)
-                .values(status=status, result=result, updated_at=datetime.utcnow())
+                .where(Task.id == task_id, Task.version == expected_version)
+                .values(
+                    status=status,
+                    result=result,
+                    version=Task.version + 1,
+                    updated_at=datetime.utcnow(),
+                )
                 .returning(Task)
             )
             db_result = await self.session.execute(stmt)
@@ -144,7 +152,12 @@ class TaskRepository:
             if task:
                 logger.info(f"Updated task {task_id} status to {status}")
                 return _row_to_dict(task)
-            return None
+            else:
+                logger.warning(
+                    f"Failed to update task {task_id}: version mismatch "
+                    f"(expected {expected_version})"
+                )
+                return None
         except Exception as e:
             logger.error(f"Failed to update task {task_id}: {e}")
             raise DatabaseError(f"Failed to update task: {e}") from e
@@ -152,7 +165,8 @@ class TaskRepository:
     async def dequeue_pending_task(self) -> dict | None:
         """Dequeue next pending task and mark it as processing.
 
-        Uses SELECT FOR UPDATE SKIP LOCKED for safe concurrent processing.
+        Uses SELECT FOR UPDATE SKIP LOCKED with optimistic locking.
+        Transaction is committed immediately after status update to minimize lock time.
 
         Returns:
             Task data as dict or None if no pending tasks
@@ -179,8 +193,9 @@ class TaskRepository:
             if not task:
                 return None
 
-            # Mark task as processing
+            # Mark task as processing and increment version
             task.status = "processing"
+            task.version = task.version + 1
             task.updated_at = datetime.utcnow()
 
             await self.session.flush()
@@ -245,3 +260,51 @@ class TaskRepository:
         except Exception as e:
             logger.error(f"Failed to get tasks for chat {chat_id}: {e}")
             raise DatabaseError(f"Failed to get tasks for chat: {e}") from e
+
+    async def recover_stuck_tasks(self, stuck_timeout_minutes: int = 5) -> int:
+        """Recover tasks stuck in 'processing' status.
+
+        Tasks in 'processing' status longer than stuck_timeout_minutes are reset to 'pending'.
+        This handles cases where worker crashes or loses connection.
+
+        Args:
+            stuck_timeout_minutes: Minutes after which task is considered stuck
+
+        Returns:
+            Number of tasks recovered
+
+        Raises:
+            DatabaseError: If database operation fails
+        """
+        try:
+            timeout_threshold = datetime.utcnow() - timedelta(
+                minutes=stuck_timeout_minutes
+            )
+
+            stmt = (
+                sa.update(Task)
+                .where(
+                    Task.status == "processing", Task.updated_at < timeout_threshold
+                )
+                .values(
+                    status="pending",
+                    version=Task.version + 1,
+                    updated_at=datetime.utcnow(),
+                )
+                .returning(Task.id)
+            )
+
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            task_ids = [str(row[0]) for row in result.fetchall()]
+            count = len(task_ids)
+
+            if count > 0:
+                logger.warning(
+                    f"Recovered {count} stuck tasks: {', '.join(task_ids[:5])}"
+                    + (f" and {count - 5} more" if count > 5 else "")
+                )
+            return count
+        except Exception as e:
+            logger.error(f"Failed to recover stuck tasks: {e}")
+            raise DatabaseError(f"Failed to recover stuck tasks: {e}") from e

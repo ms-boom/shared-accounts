@@ -28,10 +28,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+import bot.db.database as db  # Import production database module
+
 # Ensure custom dialect is registered
 # Import triggers registration in bot.db.dialect
 import bot.db.dialect  # noqa: F401
-import bot.db.database as db  # Import production database module
 from bot.core.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,6 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
     Pattern from statements/tests/fixtures/db.py
     """
     # Import custom dialect to ensure it's registered
-    import bot.db.dialect  # noqa: F401
 
     from bot.db.dialect import CConnection
 

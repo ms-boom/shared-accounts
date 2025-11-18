@@ -89,6 +89,14 @@ class Settings(BaseSettings):
         default="2,4,8",
         description="Retry backoff delays in seconds (comma-separated)",
     )
+    TASK_STUCK_TIMEOUT: int = Field(
+        default=5,
+        description="Minutes after which task in 'processing' status is considered stuck",
+    )
+    TASK_RECOVERY_INTERVAL: int = Field(
+        default=60,
+        description="Interval in seconds for stuck task recovery checks",
+    )
 
     @field_validator("DATA_DIR", "SESSION_DIR", "LOG_DIR", "ERROR_DIR")
     @classmethod

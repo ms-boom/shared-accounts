@@ -41,18 +41,31 @@ class TaskWorker:
         self.settings = settings
         self.playwright = PlaywrightService(settings)
         self.running = False
+        self.recovery_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start the worker and Playwright browser."""
         logger.info("Starting task worker...")
         self.running = True
         await self.playwright.start()
+
+        # Start recovery task for stuck tasks
+        self.recovery_task = asyncio.create_task(self._recovery_loop())
         logger.info("Task worker started")
 
     async def stop(self) -> None:
         """Stop the worker and Playwright browser."""
         logger.info("Stopping task worker...")
         self.running = False
+
+        # Stop recovery task
+        if self.recovery_task:
+            self.recovery_task.cancel()
+            try:
+                await self.recovery_task
+            except asyncio.CancelledError:
+                pass
+
         await self.playwright.stop()
         logger.info("Task worker stopped")
 
@@ -92,21 +105,30 @@ class TaskWorker:
         Args:
             task: Task data from database
         """
-        task_id: UUID = task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
+        task_id: UUID = (
+            task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
+        )
         task_type = task["task_type"]
         chat_id = task["chat_id"]
         thread_id = task.get("thread_id", 0)
         payload = task["payload"]
+        version = task["version"]
 
-        logger.info(f"Processing task {task_id}: {task_type}")
+        logger.info(f"Processing task {task_id}: {task_type} (version {version})")
 
         try:
             if task_type == "init_session":
-                await self.process_init_session(task_id, chat_id, thread_id, payload)
+                await self.process_init_session(
+                    task_id, chat_id, thread_id, payload, version
+                )
             elif task_type == "process_login_link":
-                await self.process_login_link(task_id, chat_id, thread_id, payload)
+                await self.process_login_link(
+                    task_id, chat_id, thread_id, payload, version
+                )
             elif task_type == "get_code":
-                await self.process_get_code(task_id, chat_id, thread_id, payload)
+                await self.process_get_code(
+                    task_id, chat_id, thread_id, payload, version
+                )
             else:
                 raise TaskError(f"Unknown task type: {task_type}")
 
@@ -114,8 +136,15 @@ class TaskWorker:
             logger.error(f"Task {task_id} failed: {e}")
             async with self.db.session_maker() as session, session.begin():
                 task_repo = TaskRepository(session)
-                await task_repo.update_status(task_id, "failed", str(e))
-            await self.send_message(chat_id, str(e), thread_id)
+                result = await task_repo.update_status(
+                    task_id, "failed", version, str(e)
+                )
+            if result:
+                await self.send_message(chat_id, str(e), thread_id)
+            else:
+                logger.warning(
+                    f"Failed to update task {task_id} status: version conflict"
+                )
 
         except Exception as e:
             logger.error(
@@ -123,14 +152,19 @@ class TaskWorker:
             )
             async with self.db.session_maker() as session, session.begin():
                 task_repo = TaskRepository(session)
-                await task_repo.update_status(
-                    task_id, "failed", f"Internal error: {str(e)}"
+                result = await task_repo.update_status(
+                    task_id, "failed", version, f"Internal error: {str(e)}"
                 )
-            await self.send_message(
-                chat_id,
-                "❌ An unexpected error occurred. Please try again later.",
-                thread_id,
-            )
+            if result:
+                await self.send_message(
+                    chat_id,
+                    "❌ An unexpected error occurred. Please try again later.",
+                    thread_id,
+                )
+            else:
+                logger.warning(
+                    f"Failed to update task {task_id} status: version conflict"
+                )
 
     async def process_init_session(
         self,
@@ -138,6 +172,7 @@ class TaskWorker:
         chat_id: int,
         thread_id: int,
         payload: dict,
+        version: int,
     ) -> None:
         """
         Process init_session task.
@@ -147,6 +182,7 @@ class TaskWorker:
             chat_id: Telegram chat_id
             thread_id: Telegram thread_id
             payload: Task payload with 'email' field
+            version: Task version for optimistic locking
         """
         email = payload.get("email")
         if not email:
@@ -168,7 +204,11 @@ class TaskWorker:
             )
 
             task_repo = TaskRepository(session)
-            await task_repo.update_status(task_id, "done", message)
+            result = await task_repo.update_status(task_id, "done", version, message)
+
+        if not result:
+            logger.warning(f"Task {task_id} update failed: version conflict")
+            return
 
         # Send result to user
         await self.send_message(chat_id, message, thread_id)
@@ -179,6 +219,7 @@ class TaskWorker:
         chat_id: int,
         thread_id: int,
         payload: dict,
+        version: int,
     ) -> None:
         """
         Process login link to complete authentication.
@@ -188,6 +229,7 @@ class TaskWorker:
             chat_id: Telegram chat_id
             thread_id: Telegram thread_id
             payload: Task payload with 'login_url' field
+            version: Task version for optimistic locking
         """
         login_url = payload.get("login_url")
         if not login_url:
@@ -201,7 +243,11 @@ class TaskWorker:
         # Mark task as done in transaction
         async with self.db.session_maker() as session, session.begin():
             task_repo = TaskRepository(session)
-            await task_repo.update_status(task_id, "done", message)
+            result = await task_repo.update_status(task_id, "done", version, message)
+
+        if not result:
+            logger.warning(f"Task {task_id} update failed: version conflict")
+            return
 
         # Send result to user
         await self.send_message(chat_id, message, thread_id)
@@ -212,6 +258,7 @@ class TaskWorker:
         chat_id: int,
         thread_id: int,
         payload: dict,
+        version: int,
     ) -> None:
         """
         Process get_code task.
@@ -221,6 +268,7 @@ class TaskWorker:
             chat_id: Telegram chat_id
             thread_id: Telegram thread_id
             payload: Task payload with 'auth_url' field
+            version: Task version for optimistic locking
         """
         auth_url = payload.get("auth_url")
         if not auth_url:
@@ -237,7 +285,11 @@ class TaskWorker:
             await session_repo.update_last_used(chat_id, thread_id)
 
             task_repo = TaskRepository(session)
-            await task_repo.update_status(task_id, "done", code)
+            result = await task_repo.update_status(task_id, "done", version, code)
+
+        if not result:
+            logger.warning(f"Task {task_id} update failed: version conflict")
+            return
 
         # Send code to user
         message = f"✅ Authorization code: `{code}`"
@@ -276,3 +328,41 @@ class TaskWorker:
                 )
         except Exception as e:
             logger.error(f"Failed to send message to {chat_id}/{thread_id}: {e}")
+
+    async def _recovery_loop(self) -> None:
+        """
+        Background loop for recovering stuck tasks.
+
+        Periodically checks for tasks stuck in 'processing' status
+        and resets them to 'pending' for retry.
+        """
+        logger.info(
+            f"Starting stuck task recovery loop "
+            f"(interval: {self.settings.TASK_RECOVERY_INTERVAL}s, "
+            f"timeout: {self.settings.TASK_STUCK_TIMEOUT}min)"
+        )
+
+        while self.running:
+            try:
+                await asyncio.sleep(self.settings.TASK_RECOVERY_INTERVAL)
+
+                if not self.running:
+                    break
+
+                # Recover stuck tasks in transaction
+                async with self.db.session_maker() as session, session.begin():
+                    task_repo = TaskRepository(session)
+                    recovered = await task_repo.recover_stuck_tasks(
+                        self.settings.TASK_STUCK_TIMEOUT
+                    )
+
+                if recovered > 0:
+                    logger.info(f"Recovery check: recovered {recovered} stuck tasks")
+
+            except asyncio.CancelledError:
+                logger.info("Recovery loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in recovery loop: {e}", exc_info=True)
+                # Continue running even if recovery fails
+                await asyncio.sleep(self.settings.TASK_RECOVERY_INTERVAL)
