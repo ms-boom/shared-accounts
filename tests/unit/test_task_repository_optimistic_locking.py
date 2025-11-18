@@ -129,9 +129,7 @@ class TestTaskRepositoryOptimisticLockingIntegration:
         assert task_after["status"] == "pending"
         assert task_after["version"] == 1
 
-    async def test_dequeue_increments_version(
-        self, task_repo: TaskRepository
-    ) -> None:
+    async def test_dequeue_increments_version(self, task_repo: TaskRepository) -> None:
         """Test that dequeue_pending_task increments version."""
         # Create pending task
         await task_repo.create(
@@ -149,7 +147,9 @@ class TestTaskRepositoryOptimisticLockingIntegration:
         assert dequeued["version"] == 2  # Incremented from 1 to 2
 
     async def test_recover_stuck_tasks_resets_to_pending(
-        self, task_repo: TaskRepository
+        self,
+        task_repo: TaskRepository,
+        test_database_adapter: DatabasesAdapter,
     ) -> None:
         """Test that recover_stuck_tasks resets stuck tasks to pending."""
         # Create task and manually mark as processing
@@ -181,9 +181,7 @@ class TestTaskRepositoryOptimisticLockingIntegration:
         )
 
         # Recover stuck tasks (timeout = 5 minutes)
-        recovered_count = await task_repo.recover_stuck_tasks(
-            stuck_timeout_minutes=5
-        )
+        recovered_count = await task_repo.recover_stuck_tasks(stuck_timeout_minutes=5)
 
         assert recovered_count == 1
 

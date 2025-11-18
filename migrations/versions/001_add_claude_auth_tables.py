@@ -6,7 +6,7 @@ Create Date: 2025-11-17
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
@@ -14,9 +14,9 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -25,7 +25,9 @@ def upgrade() -> None:
     op.create_table(
         "groups",
         sa.Column("id", sa.BigInteger(), nullable=False, comment="Telegram chat_id"),
-        sa.Column("title", sa.String(length=255), nullable=False, comment="Group title"),
+        sa.Column(
+            "title", sa.String(length=255), nullable=False, comment="Group title"
+        ),
         sa.Column(
             "username",
             sa.String(length=255),
@@ -67,7 +69,10 @@ def upgrade() -> None:
             comment="User username (@username)",
         ),
         sa.Column(
-            "first_name", sa.String(length=255), nullable=False, comment="User first name"
+            "first_name",
+            sa.String(length=255),
+            nullable=False,
+            comment="User first name",
         ),
         sa.Column(
             "last_name", sa.String(length=255), nullable=True, comment="User last name"
