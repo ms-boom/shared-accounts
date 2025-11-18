@@ -6,9 +6,9 @@ import re
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from databases import Database
 
 from bot.core.config import Settings
+from bot.db.database import Database
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
 from bot.db.repositories.task_repository import TaskRepository
 
@@ -115,43 +115,45 @@ async def init_session_handler(
         )
         return
 
-    # Check for existing session
+    # Check for existing session and create task using SQLAlchemy session
     thread_id = get_thread_id(message)
-    session_repo = ChatSessionRepository(database)
-    existing_session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
-    if existing_session:
-        await message.reply(
-            f"⚠️ Session already exists for this chat (email: {existing_session['email']}).\n\n"
-            f"Do you want to replace it with {email}? Reply 'yes' to confirm."
+    async with database.session_maker() as session, session.begin():
+        session_repo = ChatSessionRepository(session)
+        existing_session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
+
+        if existing_session:
+            await message.reply(
+                f"⚠️ Session already exists for this chat (email: {existing_session['email']}).\n\n"
+                f"Do you want to replace it with {email}? Reply 'yes' to confirm."
+            )
+            # TODO: Implement confirmation flow with FSM
+            return
+
+        # Create task
+        if not message.from_user:
+            await message.reply("❌ Unable to identify user.")
+            return
+
+        task_repo = TaskRepository(session)
+        payload = {"email": email}
+
+        task = await task_repo.create(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            task_type="init_session",
+            payload=payload,
+            thread_id=thread_id,
         )
-        # TODO: Implement confirmation flow with FSM
-        return
 
-    # Create task
-    if not message.from_user:
-        await message.reply("❌ Unable to identify user.")
-        return
+        await message.reply(
+            f"🔄 Initializing session for {email}.\n"
+            "Please wait for the authorization link request..."
+        )
 
-    task_repo = TaskRepository(database)
-    payload = {"email": email}
-
-    task = await task_repo.create(
-        chat_id=message.chat.id,
-        user_id=message.from_user.id,
-        task_type="init_session",
-        payload=payload,
-        thread_id=thread_id,
-    )
-
-    await message.reply(
-        f"🔄 Initializing session for {email}.\n"
-        "Please wait for the authorization link request..."
-    )
-
-    logger.info(
-        f"Created init_session task {task['id']} for chat {message.chat.id}/{thread_id}"
-    )
+        logger.info(
+            f"Created init_session task {task['id']} for chat {message.chat.id}/{thread_id}"
+        )
 
 
 @router.message(Command("get_code"))
@@ -169,62 +171,64 @@ async def get_code_handler(
         message: Incoming message
         database: Database connection
     """
-    # Check for existing session
+    # Check for existing session and create task using SQLAlchemy session
     thread_id = get_thread_id(message)
-    session_repo = ChatSessionRepository(database)
-    session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
-    if not session:
-        await message.reply(
-            "❌ No active session found for this chat.\n\n"
-            "Run /init_session <email> first to initialize a session."
+    async with database.session_maker() as db_session, db_session.begin():
+        session_repo = ChatSessionRepository(db_session)
+        session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
+
+        if not session:
+            await message.reply(
+                "❌ No active session found for this chat.\n\n"
+                "Run /init_session <email> first to initialize a session."
+            )
+            return
+
+        # Parse URL from command
+        if not message.text:
+            await message.reply("❌ Usage: /get_code <url>")
+            return
+
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            await message.reply(
+                "❌ Please provide the Claude authorization URL.\n\n"
+                "Usage: /get_code https://claude.ai/auth/authorize?..."
+            )
+            return
+
+        auth_url = parts[1].strip()
+
+        # Validate URL
+        if not is_claude_auth_url(auth_url):
+            await message.reply(
+                "❌ Invalid auth URL format. Please provide a valid Claude authorization URL.\n\n"
+                "Expected format: https://claude.ai/auth/authorize?..."
+            )
+            return
+
+        # Create task
+        if not message.from_user:
+            await message.reply("❌ Unable to identify user.")
+            return
+
+        task_repo = TaskRepository(db_session)
+        payload = {"auth_url": auth_url}
+
+        task = await task_repo.create(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            task_type="get_code",
+            payload=payload,
+            thread_id=thread_id,
         )
-        return
 
-    # Parse URL from command
-    if not message.text:
-        await message.reply("❌ Usage: /get_code <url>")
-        return
+        await message.reply("🔄 Extracting authorization code...")
 
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply(
-            "❌ Please provide the Claude authorization URL.\n\n"
-            "Usage: /get_code https://claude.ai/auth/authorize?..."
+        logger.info(
+            f"Created get_code task {task['id']} for chat {message.chat.id}/{thread_id}"
         )
-        return
-
-    auth_url = parts[1].strip()
-
-    # Validate URL
-    if not is_claude_auth_url(auth_url):
-        await message.reply(
-            "❌ Invalid auth URL format. Please provide a valid Claude authorization URL.\n\n"
-            "Expected format: https://claude.ai/auth/authorize?..."
-        )
-        return
-
-    # Create task
-    if not message.from_user:
-        await message.reply("❌ Unable to identify user.")
-        return
-
-    task_repo = TaskRepository(database)
-    payload = {"auth_url": auth_url}
-
-    task = await task_repo.create(
-        chat_id=message.chat.id,
-        user_id=message.from_user.id,
-        task_type="get_code",
-        payload=payload,
-        thread_id=thread_id,
-    )
-
-    await message.reply("🔄 Extracting authorization code...")
-
-    logger.info(
-        f"Created get_code task {task['id']} for chat {message.chat.id}/{thread_id}"
-    )
 
 
 @router.message(Command("health"))
@@ -243,32 +247,37 @@ async def health_handler(
         database: Database connection
     """
     try:
-        # Check database connection
-        try:
-            result = await database.fetch_one("SELECT 1")
-            db_status = "✅ Connected" if result else "❌ Error"
-        except Exception as e:
-            db_status = f"❌ Disconnected ({str(e)})"
-            logger.error(f"Database health check failed: {e}")
+        # Check database connection and get stats using SQLAlchemy session
+        async with database.session_maker() as db_session, db_session.begin():
+            # Check database connection
+            import sqlalchemy as sa
 
-        # Get active sessions count
-        session_repo = ChatSessionRepository(database)
-        sessions_count: int | str
-        try:
-            sessions = await session_repo.get_all_active()
-            sessions_count = len(sessions)
-        except Exception as e:
-            sessions_count = "Error"
-            logger.error(f"Failed to get sessions count: {e}")
+            db_status: str
+            try:
+                result = await db_session.execute(sa.text("SELECT 1"))
+                db_status = "✅ Connected" if result else "❌ Error"
+            except Exception as e:
+                db_status = f"❌ Disconnected ({str(e)})"
+                logger.error(f"Database health check failed: {e}")
 
-        # Get pending tasks count
-        task_repo = TaskRepository(database)
-        pending_count: int | str
-        try:
-            pending_count = await task_repo.get_pending_count()
-        except Exception as e:
-            pending_count = "Error"
-            logger.error(f"Failed to get pending tasks count: {e}")
+            # Get active sessions count
+            session_repo = ChatSessionRepository(db_session)
+            sessions_count: int | str
+            try:
+                sessions = await session_repo.get_all_active()
+                sessions_count = len(sessions)
+            except Exception as e:
+                sessions_count = "Error"
+                logger.error(f"Failed to get sessions count: {e}")
+
+            # Get pending tasks count
+            task_repo = TaskRepository(db_session)
+            pending_count: int | str
+            try:
+                pending_count = await task_repo.get_pending_count()
+            except Exception as e:
+                pending_count = "Error"
+                logger.error(f"Failed to get pending tasks count: {e}")
 
         # Format response
         status_message = (
@@ -311,47 +320,48 @@ async def handle_claude_url(
     login_url = message.text.strip()
     thread_id = get_thread_id(message)
 
-    # Check for pending init_session
-    task_repo = TaskRepository(database)
-    recent_tasks = await task_repo.get_by_chat_id(
-        message.chat.id, limit=5, thread_id=thread_id
-    )
-
-    # Find recent init_session task that's processing
-    init_task = None
-    for task in recent_tasks:
-        if task["task_type"] == "init_session" and task["status"] in [
-            "pending",
-            "processing",
-        ]:
-            init_task = task
-            break
-
-    if not init_task:
-        # No pending init_session, inform user
-        await message.reply(
-            "ℹ️ This looks like a Claude login link.\n\n"
-            "If you want to initialize a session, please run /init_session <email> first."
+    # Check for pending init_session and create task using SQLAlchemy session
+    async with database.session_maker() as db_session, db_session.begin():
+        task_repo = TaskRepository(db_session)
+        recent_tasks = await task_repo.get_by_chat_id(
+            message.chat.id, limit=5, thread_id=thread_id
         )
-        return
 
-    # Create task to process login link
-    if not message.from_user:
-        await message.reply("❌ Unable to identify user.")
-        return
+        # Find recent init_session task that's processing
+        init_task = None
+        for task in recent_tasks:
+            if task["task_type"] == "init_session" and task["status"] in [
+                "pending",
+                "processing",
+            ]:
+                init_task = task
+                break
 
-    payload = {"login_url": login_url}
+        if not init_task:
+            # No pending init_session, inform user
+            await message.reply(
+                "ℹ️ This looks like a Claude login link.\n\n"
+                "If you want to initialize a session, please run /init_session <email> first."
+            )
+            return
 
-    task = await task_repo.create(
-        chat_id=message.chat.id,
-        user_id=message.from_user.id,
-        task_type="process_login_link",
-        payload=payload,
-        thread_id=thread_id,
-    )
+        # Create task to process login link
+        if not message.from_user:
+            await message.reply("❌ Unable to identify user.")
+            return
 
-    await message.reply("🔄 Processing login link...")
+        payload = {"login_url": login_url}
 
-    logger.info(
-        f"Created process_login_link task {task['id']} for chat {message.chat.id}/{thread_id}"
-    )
+        task = await task_repo.create(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            task_type="process_login_link",
+            payload=payload,
+            thread_id=thread_id,
+        )
+
+        await message.reply("🔄 Processing login link...")
+
+        logger.info(
+            f"Created process_login_link task {task['id']} for chat {message.chat.id}/{thread_id}"
+        )
