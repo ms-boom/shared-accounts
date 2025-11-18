@@ -86,3 +86,49 @@ async def dispose():
         await bind.dispose()
         Session.configure(bind=None)
         logger.info("Database engine disposed")
+
+
+class Database:
+    """Database manager class for dependency injection.
+
+    Provides access to SQLAlchemy Session factory and manages engine lifecycle.
+    This class serves as a bridge between old DI code and new SQLAlchemy pattern.
+    """
+
+    def __init__(self, settings: Settings):
+        """Initialize database manager.
+
+        Args:
+            settings: Application settings
+        """
+        self.settings = settings
+        self._engine: AsyncEngine | None = None
+
+    @property
+    def session_maker(self) -> sa.orm.sessionmaker:
+        """Get SQLAlchemy session factory.
+
+        Returns:
+            Global Session factory
+        """
+        return Session
+
+    async def startup(self) -> None:
+        """Initialize database engine and configure global Session."""
+        self._engine = await setup(self.settings)
+
+    async def shutdown(self) -> None:
+        """Dispose database engine and cleanup resources."""
+        await dispose()
+        self._engine = None
+
+    async def create_tables(self) -> None:
+        """Create all database tables (development only)."""
+        if not self._engine:
+            raise RuntimeError("Database not initialized. Call startup() first.")
+
+        from bot.db.models import Base
+
+        async with self._engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created")

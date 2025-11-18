@@ -1,33 +1,52 @@
-"""Repository for Group model database operations."""
+"""Repository for Group model database operations.
+
+Pattern from statements/ - repository accepts session, doesn't manage transactions.
+"""
 
 import logging
 from datetime import datetime
 
-from databases import Database
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError, GroupNotFoundError
+from bot.db.models import Group
 
 logger = logging.getLogger(__name__)
 
 
+def _row_to_dict(group: Group) -> dict:
+    """Convert Group model to dict for backward compatibility."""
+    return {
+        "id": group.id,
+        "title": group.title,
+        "username": group.username,
+        "type": group.type,
+        "created_at": group.created_at,
+        "updated_at": group.updated_at,
+    }
+
+
 class GroupRepository:
-    """Repository pattern for Group model operations."""
+    """Repository pattern for Group model operations.
 
-    def __init__(self, database: Database):
-        """
-        Initialize repository.
+    Pattern from statements/ - accepts session, uses flush() not commit().
+    Transaction management is handled by caller (use case or test).
+    """
 
-        Args:
-            database: Database connection instance
-        """
-        self.db = database
-
-    async def get_by_id(self, group_id: int) -> dict | None:
-        """
-        Get group by Telegram chat_id.
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with session injection.
 
         Args:
-            group_id: Telegram chat_id
+            session: SQLAlchemy async session
+        """
+        self.session = session
+
+    async def get_by_id(self, chat_id: int) -> dict | None:
+        """Get group by Telegram chat_id.
+
+        Args:
+            chat_id: Telegram chat_id (consistent with Telegram API naming)
 
         Returns:
             Group data as dict or None if not found
@@ -35,30 +54,26 @@ class GroupRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT id, title, username, type, created_at, updated_at
-            FROM groups
-            WHERE id = :group_id
-        """
         try:
-            result = await self.db.fetch_one(query, {"group_id": group_id})
-            return dict(result) if result else None
+            stmt = sa.select(Group).where(Group.id == chat_id)
+            result = await self.session.execute(stmt)
+            group = result.scalar_one_or_none()
+            return _row_to_dict(group) if group else None
         except Exception as e:
-            logger.error(f"Failed to get group {group_id}: {e}")
+            logger.error(f"Failed to get group {chat_id}: {e}")
             raise DatabaseError(f"Failed to get group: {e}") from e
 
     async def create(
         self,
-        group_id: int,
+        chat_id: int,
         title: str,
         username: str | None,
         chat_type: str,
     ) -> dict:
-        """
-        Create a new group record.
+        """Create a new group record.
 
         Args:
-            group_id: Telegram chat_id
+            chat_id: Telegram chat_id (consistent with Telegram API naming)
             title: Group title
             username: Group username (optional)
             chat_type: Chat type ('group' or 'supergroup')
@@ -69,40 +84,33 @@ class GroupRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            INSERT INTO groups (id, title, username, type, created_at, updated_at)
-            VALUES (:id, :title, :username, :type, :created_at, :updated_at)
-            RETURNING id, title, username, type, created_at, updated_at
-        """
-        now = datetime.utcnow()
-        values = {
-            "id": group_id,
-            "title": title,
-            "username": username,
-            "type": chat_type,
-            "created_at": now,
-            "updated_at": now,
-        }
-
         try:
-            result = await self.db.fetch_one(query, values)
-            logger.info(f"Created group: {group_id} ({title})")
-            return dict(result) if result else values
+            group = Group(
+                id=chat_id,
+                title=title,
+                username=username,
+                type=chat_type,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            self.session.add(group)
+            await self.session.flush()  # Not commit - transaction managed by caller
+            logger.info(f"Created group: {chat_id} ({title})")
+            return _row_to_dict(group)
         except Exception as e:
-            logger.error(f"Failed to create group {group_id}: {e}")
+            logger.error(f"Failed to create group {chat_id}: {e}")
             raise DatabaseError(f"Failed to create group: {e}") from e
 
     async def update(
         self,
-        group_id: int,
+        chat_id: int,
         title: str | None = None,
         username: str | None = None,
     ) -> dict:
-        """
-        Update group information.
+        """Update group information.
 
         Args:
-            group_id: Telegram chat_id
+            chat_id: Telegram chat_id (consistent with Telegram API naming)
             title: New title (optional)
             username: New username (optional)
 
@@ -113,43 +121,34 @@ class GroupRepository:
             GroupNotFoundError: If group doesn't exist
             DatabaseError: If database operation fails
         """
-        # Check if group exists
-        existing = await self.get_by_id(group_id)
-        if not existing:
-            raise GroupNotFoundError(f"Group {group_id} not found")
-
-        # Check if there's anything to update
-        if title is None and username is None:
-            return existing
-
-        # Static query using COALESCE to update only provided fields
-        query = """
-            UPDATE groups
-            SET title = COALESCE(:title, title),
-                username = COALESCE(:username, username),
-                updated_at = :updated_at
-            WHERE id = :group_id
-            RETURNING id, title, username, type, created_at, updated_at
-        """
-
-        values = {
-            "group_id": group_id,
-            "title": title,
-            "username": username,
-            "updated_at": datetime.utcnow(),
-        }
-
         try:
-            result = await self.db.fetch_one(query, values)
-            logger.info(f"Updated group: {group_id}")
-            return dict(result) if result else existing
+            # Get existing group
+            stmt = sa.select(Group).where(Group.id == chat_id)
+            result = await self.session.execute(stmt)
+            group = result.scalar_one_or_none()
+
+            if not group:
+                raise GroupNotFoundError(f"Group {chat_id} not found")
+
+            # Update fields if provided
+            if title is not None:
+                group.title = title
+            if username is not None:
+                group.username = username
+
+            group.updated_at = datetime.utcnow()
+
+            await self.session.flush()
+            logger.info(f"Updated group: {chat_id}")
+            return _row_to_dict(group)
+        except GroupNotFoundError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to update group {group_id}: {e}")
+            logger.error(f"Failed to update group {chat_id}: {e}")
             raise DatabaseError(f"Failed to update group: {e}") from e
 
     async def get_all(self) -> list[dict]:
-        """
-        Get all groups.
+        """Get all groups.
 
         Returns:
             List of all groups as dicts
@@ -157,14 +156,11 @@ class GroupRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT id, title, username, type, created_at, updated_at
-            FROM groups
-            ORDER BY created_at DESC
-        """
         try:
-            results = await self.db.fetch_all(query)
-            return [dict(row) for row in results]
+            stmt = sa.select(Group).order_by(Group.created_at.desc())
+            result = await self.session.execute(stmt)
+            groups = result.scalars().all()
+            return [_row_to_dict(group) for group in groups]
         except Exception as e:
             logger.error(f"Failed to get all groups: {e}")
             raise DatabaseError(f"Failed to get all groups: {e}") from e

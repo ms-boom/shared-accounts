@@ -5,10 +5,10 @@ import logging
 from uuid import UUID
 
 from aiogram import Bot
-from databases import Database
 
 from bot.core.config import Settings
 from bot.core.exceptions import BrowserError, SessionError, TaskError
+from bot.db.database import Database
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
 from bot.db.repositories.task_repository import TaskRepository
 from bot.worker.playwright_service import PlaywrightService
@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class TaskWorker:
-    """
-    Background worker for processing tasks from the queue.
+    """Background worker for processing tasks from the queue.
 
     Polls tasks table, processes tasks with Playwright, sends results via Telegram.
+    Uses SQLAlchemy sessions with proper transaction management.
     """
 
     def __init__(
@@ -29,11 +29,10 @@ class TaskWorker:
         bot: Bot,
         settings: Settings,
     ):
-        """
-        Initialize task worker.
+        """Initialize task worker.
 
         Args:
-            database: Database connection
+            database: Database manager with session factory
             bot: Telegram bot instance for sending messages
             settings: Application settings
         """
@@ -41,8 +40,6 @@ class TaskWorker:
         self.bot = bot
         self.settings = settings
         self.playwright = PlaywrightService(settings)
-        self.task_repo = TaskRepository(database)
-        self.session_repo = ChatSessionRepository(database)
         self.running = False
 
     async def start(self) -> None:
@@ -60,18 +57,20 @@ class TaskWorker:
         logger.info("Task worker stopped")
 
     async def run(self) -> None:
-        """
-        Main worker loop: poll for tasks and process them.
+        """Main worker loop: poll for tasks and process them.
 
         Runs until stop() is called.
+        Uses SQLAlchemy sessions with proper transaction management.
         """
         await self.start()
 
         try:
             while self.running:
                 try:
-                    # Dequeue next pending task
-                    task = await self.task_repo.dequeue_pending_task()
+                    # Dequeue next pending task using transaction
+                    async with self.db.session_maker() as session, session.begin():
+                        task_repo = TaskRepository(session)
+                        task = await task_repo.dequeue_pending_task()
 
                     if task:
                         await self.process_task(task)
@@ -113,16 +112,20 @@ class TaskWorker:
 
         except (BrowserError, SessionError, TaskError) as e:
             logger.error(f"Task {task_id} failed: {e}")
-            await self.task_repo.update_status(task_id, "failed", str(e))
+            async with self.db.session_maker() as session, session.begin():
+                task_repo = TaskRepository(session)
+                await task_repo.update_status(task_id, "failed", str(e))
             await self.send_message(chat_id, str(e), thread_id)
 
         except Exception as e:
             logger.error(
                 f"Unexpected error processing task {task_id}: {e}", exc_info=True
             )
-            await self.task_repo.update_status(
-                task_id, "failed", f"Internal error: {str(e)}"
-            )
+            async with self.db.session_maker() as session, session.begin():
+                task_repo = TaskRepository(session)
+                await task_repo.update_status(
+                    task_id, "failed", f"Internal error: {str(e)}"
+                )
             await self.send_message(
                 chat_id,
                 "❌ An unexpected error occurred. Please try again later.",
@@ -154,16 +157,18 @@ class TaskWorker:
             chat_id, email, thread_id
         )
 
-        # Create session record in database
-        await self.session_repo.upsert(
-            chat_id=chat_id,
-            email=email,
-            session_path=session_path,
-            thread_id=thread_id,
-        )
+        # Create session record and mark task as done in transaction
+        async with self.db.session_maker() as session, session.begin():
+            session_repo = ChatSessionRepository(session)
+            await session_repo.upsert(
+                chat_id=chat_id,
+                email=email,
+                session_path=session_path,
+                thread_id=thread_id,
+            )
 
-        # Mark task as done
-        await self.task_repo.update_status(task_id, "done", message)
+            task_repo = TaskRepository(session)
+            await task_repo.update_status(task_id, "done", message)
 
         # Send result to user
         await self.send_message(chat_id, message, thread_id)
@@ -193,8 +198,10 @@ class TaskWorker:
             chat_id, login_url, thread_id
         )
 
-        # Mark task as done
-        await self.task_repo.update_status(task_id, "done", message)
+        # Mark task as done in transaction
+        async with self.db.session_maker() as session, session.begin():
+            task_repo = TaskRepository(session)
+            await task_repo.update_status(task_id, "done", message)
 
         # Send result to user
         await self.send_message(chat_id, message, thread_id)
@@ -224,11 +231,13 @@ class TaskWorker:
             chat_id, auth_url, thread_id
         )
 
-        # Update last_used for session
-        await self.session_repo.update_last_used(chat_id, thread_id)
+        # Update last_used and mark task as done in transaction
+        async with self.db.session_maker() as session, session.begin():
+            session_repo = ChatSessionRepository(session)
+            await session_repo.update_last_used(chat_id, thread_id)
 
-        # Mark task as done
-        await self.task_repo.update_status(task_id, "done", code)
+            task_repo = TaskRepository(session)
+            await task_repo.update_status(task_id, "done", code)
 
         # Send code to user
         message = f"✅ Authorization code: `{code}`"

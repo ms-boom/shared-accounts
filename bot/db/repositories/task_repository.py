@@ -1,32 +1,55 @@
-"""Repository for Task model database operations."""
+"""Repository for Task model database operations.
+
+Pattern from statements/ - repository accepts session, doesn't manage transactions.
+"""
 
 import logging
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from databases import Database
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
+from bot.db.models import Task
 
 logger = logging.getLogger(__name__)
 
 
-class TaskRepository:
-    """Repository pattern for Task model operations."""
+def _row_to_dict(task: Task) -> dict:
+    """Convert Task model to dict for backward compatibility."""
+    return {
+        "id": task.id,
+        "chat_id": task.chat_id,
+        "thread_id": task.thread_id,
+        "user_id": task.user_id,
+        "task_type": task.task_type,
+        "payload": task.payload,
+        "status": task.status,
+        "result": task.result,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+    }
 
-    def __init__(self, database: Database):
-        """
-        Initialize repository.
+
+class TaskRepository:
+    """Repository pattern for Task model operations.
+
+    Pattern from statements/ - accepts session, uses flush() not commit().
+    Transaction management is handled by caller (use case or test).
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with session injection.
 
         Args:
-            database: Database connection instance
+            session: SQLAlchemy async session
         """
-        self.db = database
+        self.session = session
 
     async def get_by_id(self, task_id: UUID) -> dict | None:
-        """
-        Get task by ID.
+        """Get task by ID.
 
         Args:
             task_id: Task UUID
@@ -37,15 +60,11 @@ class TaskRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
-                   result, created_at, updated_at
-            FROM tasks
-            WHERE id = :task_id
-        """
         try:
-            result = await self.db.fetch_one(query, {"task_id": str(task_id)})
-            return dict(result) if result else None
+            stmt = sa.select(Task).where(Task.id == task_id)
+            result = await self.session.execute(stmt)
+            task = result.scalar_one_or_none()
+            return _row_to_dict(task) if task else None
         except Exception as e:
             logger.error(f"Failed to get task {task_id}: {e}")
             raise DatabaseError(f"Failed to get task: {e}") from e
@@ -58,8 +77,7 @@ class TaskRepository:
         payload: dict[str, Any],
         thread_id: int = 0,
     ) -> dict:
-        """
-        Create a new task.
+        """Create a new task.
 
         Args:
             chat_id: Telegram chat_id
@@ -74,30 +92,21 @@ class TaskRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            INSERT INTO tasks (chat_id, thread_id, user_id, task_type, payload, status, created_at, updated_at)
-            VALUES (:chat_id, :thread_id, :user_id, :task_type, :payload, :status, :created_at, :updated_at)
-            RETURNING id, chat_id, thread_id, user_id, task_type, payload, status,
-                      result, created_at, updated_at
-        """
-        now = datetime.utcnow()
-        values = {
-            "chat_id": chat_id,
-            "thread_id": thread_id,
-            "user_id": user_id,
-            "task_type": task_type,
-            "payload": payload,
-            "status": "pending",
-            "created_at": now,
-            "updated_at": now,
-        }
-
         try:
-            result = await self.db.fetch_one(query, values)
-            if result is None:
-                raise DatabaseError("INSERT RETURNING returned None")
-            logger.info(f"Created task {result['id']} for chat {chat_id}/{thread_id}")
-            return dict(result)
+            task = Task(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                user_id=user_id,
+                task_type=task_type,
+                payload=payload,
+                status="pending",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            self.session.add(task)
+            await self.session.flush()  # Not commit - transaction managed by caller
+            logger.info(f"Created task {task.id} for chat {chat_id}/{thread_id}")
+            return _row_to_dict(task)
         except Exception as e:
             logger.error(f"Failed to create task for chat {chat_id}/{thread_id}: {e}")
             raise DatabaseError(f"Failed to create task: {e}") from e
@@ -108,8 +117,7 @@ class TaskRepository:
         status: str,
         result: str | None = None,
     ) -> dict | None:
-        """
-        Update task status and result.
+        """Update task status and result.
 
         Args:
             task_id: Task UUID
@@ -122,34 +130,27 @@ class TaskRepository:
         Raises:
             DatabaseError: If database operation fails
         """
-        query = """
-            UPDATE tasks
-            SET status = :status,
-                result = :result,
-                updated_at = :updated_at
-            WHERE id = :task_id
-            RETURNING id, chat_id, thread_id, user_id, task_type, payload, status,
-                      result, created_at, updated_at
-        """
-        values = {
-            "task_id": str(task_id),
-            "status": status,
-            "result": result,
-            "updated_at": datetime.utcnow(),
-        }
-
         try:
-            result_row = await self.db.fetch_one(query, values)
-            if result_row:
+            stmt = (
+                sa.update(Task)
+                .where(Task.id == task_id)
+                .values(status=status, result=result, updated_at=datetime.utcnow())
+                .returning(Task)
+            )
+            db_result = await self.session.execute(stmt)
+            await self.session.flush()
+            task = db_result.scalar_one_or_none()
+
+            if task:
                 logger.info(f"Updated task {task_id} status to {status}")
-            return dict(result_row) if result_row else None
+                return _row_to_dict(task)
+            return None
         except Exception as e:
             logger.error(f"Failed to update task {task_id}: {e}")
             raise DatabaseError(f"Failed to update task: {e}") from e
 
     async def dequeue_pending_task(self) -> dict | None:
-        """
-        Dequeue next pending task and mark it as processing.
+        """Dequeue next pending task and mark it as processing.
 
         Uses SELECT FOR UPDATE SKIP LOCKED for safe concurrent processing.
 
@@ -161,48 +162,36 @@ class TaskRepository:
 
         Note:
             Must be called within a transaction.
+            Uses pessimistic locking to prevent race conditions.
         """
-        # First, select and lock the next pending task
-        select_query = """
-            SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
-                   result, created_at, updated_at
-            FROM tasks
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-        """
-
         try:
-            task = await self.db.fetch_one(select_query)
+            # Select and lock the next pending task
+            stmt = (
+                sa.select(Task)
+                .where(Task.status == "pending")
+                .order_by(Task.created_at.asc())
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+            result = await self.session.execute(stmt)
+            task = result.scalar_one_or_none()
+
             if not task:
                 return None
 
             # Mark task as processing
-            update_query = """
-                UPDATE tasks
-                SET status = 'processing',
-                    updated_at = :updated_at
-                WHERE id = :task_id
-                RETURNING id, chat_id, thread_id, user_id, task_type, payload, status,
-                          result, created_at, updated_at
-            """
-            values = {
-                "task_id": task["id"],
-                "updated_at": datetime.utcnow(),
-            }
+            task.status = "processing"
+            task.updated_at = datetime.utcnow()
 
-            result = await self.db.fetch_one(update_query, values)
-            if result:
-                logger.info(f"Dequeued task {result['id']} for processing")
-            return dict(result) if result else None
+            await self.session.flush()
+            logger.info(f"Dequeued task {task.id} for processing")
+            return _row_to_dict(task)
         except Exception as e:
             logger.error(f"Failed to dequeue pending task: {e}")
             raise DatabaseError(f"Failed to dequeue pending task: {e}") from e
 
     async def get_pending_count(self) -> int:
-        """
-        Get count of pending tasks.
+        """Get count of pending tasks.
 
         Returns:
             Number of pending tasks
@@ -210,14 +199,15 @@ class TaskRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        query = """
-            SELECT COUNT(*) as count
-            FROM tasks
-            WHERE status = 'pending'
-        """
         try:
-            result = await self.db.fetch_one(query)
-            return result["count"] if result else 0
+            stmt = (
+                sa.select(sa.func.count())
+                .select_from(Task)
+                .where(Task.status == "pending")
+            )
+            result = await self.session.execute(stmt)
+            count = result.scalar()
+            return count if count is not None else 0
         except Exception as e:
             logger.error(f"Failed to get pending task count: {e}")
             raise DatabaseError(f"Failed to get pending task count: {e}") from e
@@ -228,8 +218,7 @@ class TaskRepository:
         limit: int = 10,
         thread_id: int | None = None,
     ) -> list[dict]:
-        """
-        Get tasks for a specific chat or topic.
+        """Get tasks for a specific chat or topic.
 
         Args:
             chat_id: Telegram chat_id
@@ -242,30 +231,17 @@ class TaskRepository:
         Raises:
             DatabaseError: If database query fails
         """
-        if thread_id is not None:
-            query = """
-                SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
-                       result, created_at, updated_at
-                FROM tasks
-                WHERE chat_id = :chat_id AND thread_id = :thread_id
-                ORDER BY created_at DESC
-                LIMIT :limit
-            """
-            params = {"chat_id": chat_id, "thread_id": thread_id, "limit": limit}
-        else:
-            query = """
-                SELECT id, chat_id, thread_id, user_id, task_type, payload, status,
-                       result, created_at, updated_at
-                FROM tasks
-                WHERE chat_id = :chat_id
-                ORDER BY created_at DESC
-                LIMIT :limit
-            """
-            params = {"chat_id": chat_id, "limit": limit}
-
         try:
-            results = await self.db.fetch_all(query, params)
-            return [dict(row) for row in results]
+            stmt = sa.select(Task).where(Task.chat_id == chat_id)
+
+            if thread_id is not None:
+                stmt = stmt.where(Task.thread_id == thread_id)
+
+            stmt = stmt.order_by(Task.created_at.desc()).limit(limit)
+
+            result = await self.session.execute(stmt)
+            tasks = result.scalars().all()
+            return [_row_to_dict(task) for task in tasks]
         except Exception as e:
             logger.error(f"Failed to get tasks for chat {chat_id}: {e}")
             raise DatabaseError(f"Failed to get tasks for chat: {e}") from e

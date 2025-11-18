@@ -6,9 +6,9 @@ import signal
 import sys
 
 from aiogram import Bot
-from databases import Database
 
 from bot.core.config import get_settings
+from bot.db.database import Database
 from bot.worker.task_worker import TaskWorker
 
 # Configure logging
@@ -34,8 +34,8 @@ async def main() -> None:
     settings.ERROR_DIR.mkdir(parents=True, exist_ok=True)
 
     # Initialize database connection
-    database = Database(settings.DATABASE_URL)
-    await database.connect()
+    database = Database(settings)
+    await database.startup()
     logger.info(f"Connected to database: {settings.DATABASE_URL}")
 
     # Initialize Telegram bot
@@ -75,7 +75,7 @@ async def main() -> None:
 
     finally:
         # Cleanup
-        await database.disconnect()
+        await database.shutdown()
         await bot.session.close()
         logger.info("Worker shutdown complete")
 
