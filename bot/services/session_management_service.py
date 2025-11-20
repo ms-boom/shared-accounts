@@ -90,7 +90,9 @@ class SessionManagementService:
             # Save session state
             await context.storage_state(path=str(session_path / "state.json"))
 
-            return "📧 Email sent! Please send me the authorization link from your inbox."
+            return (
+                "📧 Email sent! Please send me the authorization link from your inbox."
+            )
 
         except PlaywrightTimeoutError as e:
             logger.error(f"Timeout during session init for {session_path}: {e}")

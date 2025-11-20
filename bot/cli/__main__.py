@@ -27,7 +27,7 @@ def cli(ctx: click.Context, log_level: str | None) -> None:
     ctx.ensure_object(dict)
 
     # Load settings
-    settings = Settings()  # type: ignore[call-arg]
+    settings = Settings()
     ctx.obj["settings"] = settings
 
     # Configure logging

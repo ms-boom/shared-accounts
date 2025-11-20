@@ -44,7 +44,9 @@ class PlaywrightService:
             self.browser = await self.playwright.chromium.launch(
                 headless=self.settings.PLAYWRIGHT_HEADLESS,
             )
-            self._session_service = SessionManagementService(self.settings, self.browser)
+            self._session_service = SessionManagementService(
+                self.settings, self.browser
+            )
             logger.info("Playwright browser started")
         except Exception as e:
             logger.error(f"Failed to start Playwright: {e}")

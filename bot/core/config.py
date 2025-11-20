@@ -125,4 +125,4 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     """Get application settings instance."""
-    return Settings()  # type: ignore[call-arg]
+    return Settings()

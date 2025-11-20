@@ -43,7 +43,9 @@ def init_session(ctx: click.Context, session_path: str, email: str) -> None:
 
     # Validate email
     if not ValidationService.validate_email(email):
-        click.echo("❌ Invalid email format. Please provide a valid email address.", err=True)
+        click.echo(
+            "❌ Invalid email format. Please provide a valid email address.", err=True
+        )
         raise click.Abort()
 
     click.echo(f"🔄 Initializing session for {email}")

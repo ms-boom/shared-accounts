@@ -127,7 +127,7 @@ def health(ctx: click.Context, format: str) -> None:
         except Exception as e:
             logger.error(f"Health check failed: {e}", exc_info=True)
             click.echo(f"❌ Health check failed: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         finally:
             await database.disconnect()
 
