@@ -1,6 +1,7 @@
 """Health check command for CLI."""
 
 import asyncio
+import json
 import logging
 
 import click
@@ -70,8 +71,6 @@ def health(ctx: click.Context, format: str) -> None:
                     logger.error(f"Failed to get pending tasks count: {e}")
 
             if format == "json":
-                import json
-
                 health_data = {
                     "status": "healthy" if db_status == "connected" else "unhealthy",
                     "database": {

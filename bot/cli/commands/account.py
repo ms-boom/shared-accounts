@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import shutil
 from pathlib import Path
 
 import click
@@ -322,8 +323,6 @@ def delete_session(ctx: click.Context, session_path: str, force: bool) -> None:
         return
 
     try:
-        import shutil
-
         if session_dir.exists():
             shutil.rmtree(session_dir)
             click.echo(f"✅ Deleted session: {session_dir}")

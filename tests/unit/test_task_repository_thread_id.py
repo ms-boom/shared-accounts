@@ -1,5 +1,7 @@
 """Unit tests for TaskRepository with thread_id support."""
 
+import inspect
+
 import pytest
 
 from bot.db.repositories.task_repository import TaskRepository
@@ -25,8 +27,6 @@ class TestTaskRepositoryThreadId:
 
         # This test verifies the API exists with correct parameters
         assert hasattr(task_repo, "create")
-        import inspect
-
         sig = inspect.signature(task_repo.create)
         assert "thread_id" in sig.parameters
         assert sig.parameters["thread_id"].default == 0
@@ -36,8 +36,6 @@ class TestTaskRepositoryThreadId:
     ) -> None:
         """Test creating task for specific topic."""
         # This test verifies the method signature
-        import inspect
-
         sig = inspect.signature(task_repo.create)
 
         # Verify thread_id parameter exists with default value
@@ -55,8 +53,6 @@ class TestTaskRepositoryThreadId:
     ) -> None:
         """Test get_by_chat_id can filter by thread_id."""
         # Verify method signature includes thread_id parameter
-        import inspect
-
         sig = inspect.signature(task_repo.get_by_chat_id)
 
         assert "chat_id" in sig.parameters
@@ -198,6 +194,7 @@ class TestTaskRepositoryThreadIdIntegration:
         updated = await task_repo.update_status(
             task_id=created["id"],
             status="processing",
+            expected_version=created["version"],
         )
 
         assert updated is not None

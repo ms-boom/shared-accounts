@@ -2,6 +2,7 @@
 
 import logging
 
+import sqlalchemy as sa
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -225,8 +226,6 @@ async def health_handler(
         # Check database connection and get stats using SQLAlchemy session
         async with database.session_maker() as db_session, db_session.begin():
             # Check database connection
-            import sqlalchemy as sa
-
             db_status: str
             try:
                 result = await db_session.execute(sa.text("SELECT 1"))

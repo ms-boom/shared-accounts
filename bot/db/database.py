@@ -25,6 +25,8 @@ import sqlalchemy.orm
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from bot.core.config import Settings
+from bot.db.dialect import CConnection
+from bot.db.models import Base
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +58,6 @@ async def setup(settings: Settings) -> AsyncEngine:
         return bind
 
     # Pattern from statements - use CConnection and disable statement caching
-    from bot.db.dialect import CConnection
-
     connect_args = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
@@ -129,8 +129,6 @@ class Database:
         """Create all database tables (development only)."""
         if not self._engine:
             raise RuntimeError("Database not initialized. Call startup() first.")
-
-        from bot.db.models import Base
 
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

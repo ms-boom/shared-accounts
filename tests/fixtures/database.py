@@ -12,13 +12,11 @@ This module implements database fixtures with:
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    from tests.adapters import DatabasesAdapter
 import sqlalchemy as sa
 import sqlalchemy.event
 import sqlalchemy.ext.asyncio
@@ -34,9 +32,14 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-import bot.db.database as db  # Import production database module
-import bot.db.dialect  # Import triggers dialect registration via sa.dialects.registry
+import bot.db.database as db
+import bot.db.dialect
 from bot.core.config import Settings
+from bot.db.dialect import CConnection
+from tests.adapters import DatabasesAdapter
+
+if TYPE_CHECKING:
+    pass
 
 # Ensure custom dialect module is loaded (triggers sa.dialects.registry call)
 # This import has a side effect of registering CustomAsyncpgDialect
@@ -58,8 +61,6 @@ def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
 
     DATABASE_URL can be overridden via environment variable for CI/CD.
     """
-    import os
-
     # Create temp directories for test data
     temp_dir = tmp_path_factory.mktemp("test_data")
 
@@ -129,10 +130,6 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
 
     Pattern from statements/tests/fixtures/db.py
     """
-    # Import custom dialect to ensure it's registered
-
-    from bot.db.dialect import CConnection
-
     connect_args = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
@@ -273,6 +270,4 @@ async def test_database_adapter(
     Recommended for migrating tests from test_database to db_session
     without modifying repository code.
     """
-    from tests.adapters import DatabasesAdapter
-
     yield DatabasesAdapter(db_session)

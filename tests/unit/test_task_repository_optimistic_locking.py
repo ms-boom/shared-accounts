@@ -1,6 +1,10 @@
 """Unit tests for TaskRepository optimistic locking functionality."""
 
+import datetime
+import inspect
+
 import pytest
+from databases import Database
 
 from bot.db.repositories.task_repository import TaskRepository
 from tests.adapters import DatabasesAdapter
@@ -19,8 +23,6 @@ class TestTaskRepositoryOptimisticLocking:
         self, task_repo: TaskRepository
     ) -> None:
         """Test that update_status requires expected_version parameter."""
-        import inspect
-
         sig = inspect.signature(task_repo.update_status)
 
         # Verify expected_version parameter exists
@@ -37,8 +39,6 @@ class TestTaskRepositoryOptimisticLocking:
     ) -> None:
         """Test that recover_stuck_tasks method exists."""
         assert hasattr(task_repo, "recover_stuck_tasks")
-
-        import inspect
 
         sig = inspect.signature(task_repo.recover_stuck_tasks)
 
@@ -162,13 +162,9 @@ class TestTaskRepositoryOptimisticLockingIntegration:
 
         # Manually set to processing with old timestamp
         # (In real scenario this would be done via dequeue)
-        import datetime
-
         old_time = datetime.datetime.utcnow() - datetime.timedelta(minutes=10)
 
         # Simulate stuck task by updating directly in DB
-        from databases import Database
-
         db: Database = test_database_adapter
         await db.execute(
             """

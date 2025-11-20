@@ -1,5 +1,7 @@
 """Unit tests for bot/db/repositories/user_repository.py."""
 
+import asyncio
+
 import pytest
 
 from bot.core.exceptions import UserNotFoundError
@@ -214,8 +216,6 @@ class TestUserRepository:
         )
 
         # Small delay to ensure timestamp difference
-        import asyncio
-
         await asyncio.sleep(0.01)
 
         # Update user
