@@ -21,7 +21,6 @@ class GroupService:
             database: Database instance
         """
         self.db = database
-        self.repository = GroupRepository(database.get_connection())  # type: ignore[attr-defined]
 
     async def register_group(self, chat: Chat) -> dict:
         """
@@ -34,25 +33,27 @@ class GroupService:
             Group data as dict
         """
         group_id = chat.id
-        existing = await self.repository.get_by_id(group_id)
+        async with self.db.session_maker() as session, session.begin():
+            repository = GroupRepository(session)
+            existing = await repository.get_by_id(group_id)
 
-        if existing:
-            # Update existing group info
-            logger.info(f"Updating existing group: {group_id}")
-            return await self.repository.update(
-                chat_id=group_id,
-                title=chat.title,
-                username=chat.username,
-            )
-        else:
-            # Create new group
-            logger.info(f"Registering new group: {group_id}")
-            return await self.repository.create(
-                chat_id=group_id,
-                title=chat.title or "Unknown",
-                username=chat.username,
-                chat_type=chat.type,
-            )
+            if existing:
+                # Update existing group info
+                logger.info(f"Updating existing group: {group_id}")
+                return await repository.update(
+                    chat_id=group_id,
+                    title=chat.title,
+                    username=chat.username,
+                )
+            else:
+                # Create new group
+                logger.info(f"Registering new group: {group_id}")
+                return await repository.create(
+                    chat_id=group_id,
+                    title=chat.title or "Unknown",
+                    username=chat.username,
+                    chat_type=chat.type,
+                )
 
     async def get_group(self, group_id: int) -> dict | None:
         """
@@ -64,7 +65,9 @@ class GroupService:
         Returns:
             Group data as dict or None if not found
         """
-        return await self.repository.get_by_id(group_id)
+        async with self.db.session_maker() as session:
+            repository = GroupRepository(session)
+            return await repository.get_by_id(group_id)
 
     async def get_all_groups(self) -> list[dict]:
         """
@@ -73,7 +76,9 @@ class GroupService:
         Returns:
             List of all groups
         """
-        return await self.repository.get_all()
+        async with self.db.session_maker() as session:
+            repository = GroupRepository(session)
+            return await repository.get_all()
 
     async def update_group_info(
         self,
@@ -92,8 +97,10 @@ class GroupService:
         Returns:
             Updated group data
         """
-        return await self.repository.update(
-            chat_id=group_id,
-            title=title,
-            username=username,
-        )
+        async with self.db.session_maker() as session, session.begin():
+            repository = GroupRepository(session)
+            return await repository.update(
+                chat_id=group_id,
+                title=title,
+                username=username,
+            )

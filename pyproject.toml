@@ -106,6 +106,10 @@ module = [
     "playwright.*",
     "structlog.*",
     "asyncpg.*",
+    "pydantic.*",
+    "pydantic_settings.*",
+    "sqlalchemy.*",
+    "click.*",
 ]
 ignore_missing_imports = true
 

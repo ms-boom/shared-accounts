@@ -25,4 +25,6 @@ class IsPrivateChat(Filter):
         Returns:
             True if private chat, False otherwise
         """
-        return message.chat.type == "private"
+        # aiogram types are not fully typed, explicit bool conversion
+        is_private: bool = message.chat.type == "private"
+        return is_private
