@@ -601,58 +601,80 @@ async def init_session_handler(message: Message, database: Database):
 
 ## CLI (Command Line Interface)
 
-В дополнение к Telegram боту, проект предоставляет полнофункциональный CLI для управления сессиями напрямую из командной строки.
+В дополнение к Telegram боту, проект предоставляет полнофункциональный CLI для управления сессиями напрямую через пути к файлам.
 
 ### Возможности CLI
 
-- **Управление сессиями** - инициализация, удаление, просмотр списка сессий
-- **Получение кодов авторизации** - извлечение кодов без использования Telegram
+- **Управление сессиями через пути** - создание сессий в произвольных директориях
+- **Независимость от Telegram** - полный доступ к Playwright без бота
+- **Получение кодов авторизации** - извлечение кодов без базы данных
 - **Проверка здоровья системы** - мониторинг БД, сессий, задач
-- **Интеграция со скриптами** - JSON output для автоматизации
+- **Интеграция со скриптами** - JSON output и batch операции
 
-### Использование
+### Быстрый старт
 
 ```bash
 # Установка зависимостей
 uv sync
 source .venv/bin/activate
 
-# Проверка здоровья системы
-python -m bot.cli health
+# Создать новую сессию
+python -m bot.cli account init-session ./my-session user@example.com
 
-# Инициализация новой сессии
-python -m bot.cli account init-session 123456789 0 user@example.com
+# Обработать ссылку из email
+python -m bot.cli account process-login ./my-session "https://claude.ai/login?token=..."
 
-# Список всех сессий
-python -m bot.cli account list-sessions
-
-# Получение кода авторизации
-python -m bot.cli account get-code 123456789 0 "https://claude.ai/auth/authorize?..."
+# Получить код авторизации
+python -m bot.cli account get-code ./my-session "https://claude.ai/auth/authorize?..."
 ```
 
-### Доступные команды
+### Основные команды
 
-**account** - Управление сессиями Claude:
-- `init-session` - Инициализировать новую сессию
-- `process-login` - Обработать login ссылку из email
-- `get-code` - Извлечь код авторизации
-- `list-sessions` - Список всех сессий (table/json)
-- `delete-session` - Удалить сессию
+**account** - Управление сессиями через пути:
+- `init-session <path> <email>` - Создать сессию по указанному пути
+- `process-login <path> <url>` - Обработать login ссылку из email
+- `get-code <path> <url>` - Извлечь код авторизации
+- `list-chats` - Список сессий из БД бота (table/json)
+- `delete-session <path>` - Удалить сессию
 
 **health** - Проверка состояния системы:
 - Database connection status
 - Активные сессии
 - Количество pending задач
 
+### Примеры использования
+
+```bash
+# CLI-only workflow (без Telegram бота)
+python -m bot.cli account init-session ~/sessions/work work@example.com
+python -m bot.cli account process-login ~/sessions/work <login_url>
+python -m bot.cli account get-code ~/sessions/work <auth_url>
+
+# Использование сессии созданной ботом
+python -m bot.cli account list-chats  # Найти путь к сессии
+python -m bot.cli account get-code /data/sessions/123456789 <auth_url>
+
+# Batch обработка
+for url in $(cat urls.txt); do
+  python -m bot.cli account get-code ./session "$url"
+done
+```
+
 ### Архитектура CLI
 
-CLI использует те же сервисы, что и Telegram бот:
+**Ключевое отличие**: CLI использует **пути к сессиям** вместо `chat_id/thread_id`:
+
+- ✅ Гибкость - сессии в любой директории
+- ✅ Портируемость - не требует БД для работы
+- ✅ Явность - путь показывает где хранится сессия
+- ✅ Совместимость - может использовать сессии бота
+
+CLI использует те же сервисы:
 - **PlaywrightService** - автоматизация браузера
-- **ChatSessionRepository** - работа с БД сессий
-- **TaskRepository** - управление очередью задач
+- **ChatSessionRepository** - доступ к БД (только для list-chats)
 - **Settings** - конфигурация приложения
 
-Это обеспечивает полную согласованность между bot и CLI операциями.
+Полная согласованность между bot и CLI операциями.
 
 ### Документация
 

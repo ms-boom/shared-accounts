@@ -1,15 +1,15 @@
 # Claude Authorization Bot CLI
 
-Command-line interface for managing Claude sessions and authorization codes.
+Command-line interface for managing Claude sessions and authorization codes using session paths.
 
 ## Overview
 
-The CLI provides direct access to the same Playwright services and database that the Telegram bot uses. This allows for:
+The CLI provides direct access to Playwright browser automation without requiring Telegram. Key features:
 
-- Managing sessions outside of Telegram
-- Batch operations on sessions
-- Debugging and health checks
-- Integration with scripts and automation
+- **Direct session management** using file system paths
+- **No Telegram required** for authorization code extraction
+- **Batch operations** and scripting support
+- **Health monitoring** of database and sessions
 
 ## Installation
 
@@ -28,23 +28,17 @@ Run the CLI using:
 python -m bot.cli [OPTIONS] COMMAND [ARGS]...
 ```
 
-Or if the package is installed (with `tool.uv.package = true`):
-
-```bash
-claude-bot [OPTIONS] COMMAND [ARGS]...
-```
-
 ### Global Options
 
 - `--log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]` - Set logging level
 
 ### Environment Variables
 
-The CLI uses the same configuration as the bot. Make sure to set:
+The CLI uses the same configuration as the bot. Set these variables:
 
 ```bash
-export TELEGRAM_TOKEN=your_token  # Required by settings, but not used in CLI
-export DATABASE_URL=postgresql+asyncpg://user:pass@localhost/claude_bot
+export TELEGRAM_TOKEN=dummy  # Required by settings, not used by CLI
+export DATABASE_URL=postgresql+asyncpg://user:pass@localhost/claude_bot  # Optional for list-chats
 ```
 
 Or create a `.env` file in the project root.
@@ -88,57 +82,79 @@ python -m bot.cli health --format json
 ✅ All systems operational
 ```
 
-### `account` - Account Management
+### `account` - Session Management
 
-Group of commands for managing Claude sessions.
+Group of commands for managing Claude sessions using file system paths.
 
 #### `account init-session` - Initialize Session
 
-Initialize a new Claude session for a chat.
+Initialize a new Claude session at specified path.
 
 ```bash
-python -m bot.cli account init-session CHAT_ID [THREAD_ID] EMAIL
+python -m bot.cli account init-session SESSION_PATH EMAIL
 ```
 
 **Arguments:**
-- `CHAT_ID` - Telegram chat ID (integer)
-- `THREAD_ID` - Telegram thread ID (default: 0 for main chat)
+- `SESSION_PATH` - Path where Playwright session will be stored (directory will be created)
 - `EMAIL` - Email address for Claude account
 
 **Example:**
 
 ```bash
-# Initialize session for main chat
-python -m bot.cli account init-session 123456789 0 user@example.com
+# Initialize session in custom directory
+python -m bot.cli account init-session /data/sessions/my-project user@example.com
 
-# Initialize session for topic in supergroup
-python -m bot.cli account init-session 123456789 42 user@example.com
+# Initialize in current directory
+python -m bot.cli account init-session ./my-session user@example.com
 ```
 
 **Workflow:**
 
-1. Opens Claude login page
-2. Fills email and requests login link
-3. Saves session to database
-4. Prompts you to check email and use `process-login` command
+1. Creates session directory at specified path
+2. Opens Claude login page in headless browser
+3. Fills email and requests login link
+4. Saves browser state to `SESSION_PATH/state.json`
+5. Prompts you to check email for login link
+
+**Output:**
+
+```
+🔄 Initializing session for user@example.com
+📁 Session path: /data/sessions/my-project
+✅ 📧 Email sent! Please check your inbox for the authorization link.
+
+Next steps:
+1. Check your email for the login link from Claude
+2. Run: python -m bot.cli account process-login /data/sessions/my-project <login_url>
+```
 
 #### `account process-login` - Process Login Link
 
 Complete authentication by processing the login link from email.
 
 ```bash
-python -m bot.cli account process-login CHAT_ID [THREAD_ID] LOGIN_URL
+python -m bot.cli account process-login SESSION_PATH LOGIN_URL
 ```
 
 **Arguments:**
-- `CHAT_ID` - Telegram chat ID
-- `THREAD_ID` - Telegram thread ID (default: 0)
-- `LOGIN_URL` - Login URL from Claude email
+- `SESSION_PATH` - Path to Playwright session directory (must exist from init-session)
+- `LOGIN_URL` - Login URL from Claude email (e.g., `https://claude.ai/login?token=...`)
 
 **Example:**
 
 ```bash
-python -m bot.cli account process-login 123456789 0 "https://claude.ai/login?token=..."
+python -m bot.cli account process-login /data/sessions/my-project "https://claude.ai/login?token=abc123..."
+```
+
+**Output:**
+
+```
+🔄 Processing login link
+📁 Session: /data/sessions/my-project
+✅ Session authenticated successfully!
+
+You can now use:
+python -m bot.cli account get-code /data/sessions/my-project <auth_url>
 ```
 
 #### `account get-code` - Extract Authorization Code
@@ -146,23 +162,25 @@ python -m bot.cli account process-login 123456789 0 "https://claude.ai/login?tok
 Extract authorization code from Claude authorization URL.
 
 ```bash
-python -m bot.cli account get-code CHAT_ID [THREAD_ID] AUTH_URL
+python -m bot.cli account get-code SESSION_PATH AUTH_URL
 ```
 
 **Arguments:**
-- `CHAT_ID` - Telegram chat ID
-- `THREAD_ID` - Telegram thread ID (default: 0)
-- `AUTH_URL` - Authorization URL from Claude Code
+- `SESSION_PATH` - Path to authenticated Playwright session directory
+- `AUTH_URL` - Authorization URL from Claude Code (e.g., `https://claude.ai/auth/authorize?...`)
 
 **Example:**
 
 ```bash
-python -m bot.cli account get-code 123456789 0 "https://claude.ai/auth/authorize?..."
+python -m bot.cli account get-code /data/sessions/my-project "https://claude.ai/auth/authorize?client_id=..."
 ```
 
 **Output:**
 
 ```
+🔄 Extracting authorization code
+📁 Session: /data/sessions/my-project
+
 ✅ Authorization code:
 
     ABC123XYZ456
@@ -170,54 +188,70 @@ python -m bot.cli account get-code 123456789 0 "https://claude.ai/auth/authorize
 Copy this code and paste it into Claude Code CLI.
 ```
 
-#### `account list-sessions` - List Sessions
+#### `account list-chats` - List Chat Sessions
 
-List all active Claude sessions.
+List all chat sessions from database with their session paths (bot-managed sessions only).
 
 ```bash
-python -m bot.cli account list-sessions [OPTIONS]
+python -m bot.cli account list-chats [OPTIONS]
 ```
 
 **Options:**
-- `--chat-id INTEGER` - Filter by specific chat ID
 - `--format [table|json]` - Output format (default: table)
 
 **Examples:**
 
 ```bash
-# List all sessions (table format)
-python -m bot.cli account list-sessions
-
-# List sessions for specific chat
-python -m bot.cli account list-sessions --chat-id 123456789
+# Table format (default)
+python -m bot.cli account list-chats
 
 # JSON format for scripting
-python -m bot.cli account list-sessions --format json
+python -m bot.cli account list-chats --format json
 ```
 
 **Table Output:**
 
 ```
-Chat ID         Thread     Email                          Created              Last Used
-----------------------------------------------------------------------------------------------------
-123456789       0          user1@example.com              2025-11-20 10:30     2025-11-20 15:45
-123456789       42         user2@example.com              2025-11-19 14:20     Never
-987654321       0          admin@example.com              2025-11-18 09:15     2025-11-20 12:30
+Chat ID         Thread     Email                          Session Path
+------------------------------------------------------------------------------------------------------------------------
+123456789       0          user1@example.com              /data/sessions/123456789
+123456789       42         user2@example.com              /data/sessions/123456789/42
+987654321       0          admin@example.com              /data/sessions/987654321
 
-Total sessions: 3
+Total chats: 3
+
+Use session paths with other commands:
+  python -m bot.cli account get-code <session_path> <auth_url>
 ```
+
+**JSON Output:**
+
+```json
+[
+  {
+    "chat_id": 123456789,
+    "thread_id": 0,
+    "email": "user1@example.com",
+    "session_path": "/data/sessions/123456789",
+    "created_at": "2025-11-20T10:30:00",
+    "last_used": "2025-11-20T15:45:00"
+  },
+  ...
+]
+```
+
+**Note:** This command requires database access and only shows sessions created by the Telegram bot. For manually created sessions (via `init-session`), simply use the session path directly.
 
 #### `account delete-session` - Delete Session
 
-Delete a Claude session for a chat.
+Delete a Claude session directory and all its contents.
 
 ```bash
-python -m bot.cli account delete-session CHAT_ID [THREAD_ID] [OPTIONS]
+python -m bot.cli account delete-session SESSION_PATH [OPTIONS]
 ```
 
 **Arguments:**
-- `CHAT_ID` - Telegram chat ID
-- `THREAD_ID` - Telegram thread ID (default: 0)
+- `SESSION_PATH` - Path to Playwright session directory to delete
 
 **Options:**
 - `--force` - Skip confirmation prompt
@@ -225,138 +259,220 @@ python -m bot.cli account delete-session CHAT_ID [THREAD_ID] [OPTIONS]
 **Example:**
 
 ```bash
-# Delete session with confirmation
-python -m bot.cli account delete-session 123456789 0
+# Delete with confirmation
+python -m bot.cli account delete-session /data/sessions/my-project
 
 # Delete without confirmation
-python -m bot.cli account delete-session 123456789 0 --force
+python -m bot.cli account delete-session /data/sessions/my-project --force
 ```
 
-## Common Use Cases
+**Output:**
 
-### Check System Health
+```
+Delete session at /data/sessions/my-project? [y/N]: y
+✅ Deleted session: /data/sessions/my-project
+```
+
+## Complete Workflow
+
+### 1. Initialize New Session
 
 ```bash
-python -m bot.cli health
+# Step 1: Create session
+python -m bot.cli account init-session ./my-claude-session myemail@example.com
+
+# Step 2: Check email and copy login link
+
+# Step 3: Process login link
+python -m bot.cli account process-login ./my-claude-session "https://claude.ai/login?token=..."
 ```
 
-### Initialize New Session
+### 2. Get Authorization Code
 
 ```bash
-# Step 1: Initialize session
-python -m bot.cli account init-session 123456789 0 user@example.com
-
-# Step 2: Check email and copy login link, then:
-python -m bot.cli account process-login 123456789 0 "https://claude.ai/login?token=..."
-
-# Step 3: Get authorization code when needed
-python -m bot.cli account get-code 123456789 0 "https://claude.ai/auth/authorize?..."
+# When Claude Code prompts for authorization
+python -m bot.cli account get-code ./my-claude-session "https://claude.ai/auth/authorize?..."
 ```
 
-### List All Sessions
+### 3. List Bot-Managed Sessions
 
 ```bash
-python -m bot.cli account list-sessions
+# See all sessions created by Telegram bot
+python -m bot.cli account list-chats
+
+# Get specific session path
+python -m bot.cli account list-chats --format json | jq '.[] | select(.email=="user@example.com") | .session_path'
 ```
 
-### Export Sessions to JSON
+## Use Cases
+
+### CLI-Only Workflow (No Telegram Bot)
+
+Create and manage sessions entirely from command line:
 
 ```bash
-python -m bot.cli account list-sessions --format json > sessions.json
+# Initialize session
+python -m bot.cli account init-session ~/claude-sessions/work work@company.com
+
+# Process login (after receiving email)
+python -m bot.cli account process-login ~/claude-sessions/work "https://claude.ai/login?token=..."
+
+# Get codes as needed
+python -m bot.cli account get-code ~/claude-sessions/work "https://claude.ai/auth/authorize?..."
 ```
 
-### Delete Old Sessions
+### Using Bot-Created Sessions
+
+If you have sessions created by the Telegram bot, find their paths:
 
 ```bash
-# List sessions first
-python -m bot.cli account list-sessions
+# Find path for specific chat
+SESSION_PATH=$(python -m bot.cli account list-chats --format json | jq -r '.[] | select(.chat_id==123456789) | .session_path')
 
-# Delete specific session
-python -m bot.cli account delete-session 123456789 0 --force
+# Use the session
+python -m bot.cli account get-code "$SESSION_PATH" "https://claude.ai/auth/authorize?..."
 ```
 
-## Integration with Scripts
+### Batch Code Extraction
 
-The CLI is designed to work well in scripts and automation:
+Extract codes for multiple authorization URLs:
 
 ```bash
 #!/bin/bash
+SESSION_PATH="/data/sessions/my-project"
 
-# Check health
-if ! python -m bot.cli health --format json | jq -e '.status == "healthy"' > /dev/null; then
-  echo "System unhealthy!"
-  exit 1
-fi
-
-# List sessions
-python -m bot.cli account list-sessions --format json | jq '.[] | select(.last_used == null)'
-
-# Get code for automated workflows
-CODE=$(python -m bot.cli account get-code 123456789 0 "$AUTH_URL" | grep -oP '(?<=    ).*')
-echo "Code: $CODE"
+# Read URLs from file
+while IFS= read -r auth_url; do
+  echo "Processing: $auth_url"
+  python -m bot.cli account get-code "$SESSION_PATH" "$auth_url"
+done < auth_urls.txt
 ```
+
+### Session Maintenance
+
+```bash
+# Check system health
+python -m bot.cli health
+
+# List all bot-managed sessions
+python -m bot.cli account list-chats
+
+# Clean up old session
+python -m bot.cli account delete-session /data/sessions/old-project --force
+```
+
+## Session Directory Structure
+
+Each session is stored in a directory with this structure:
+
+```
+/path/to/session/
+├── state.json           # Playwright browser state (cookies, storage)
+├── error_init.png       # Screenshot if initialization fails (optional)
+├── error_login.png      # Screenshot if login fails (optional)
+└── error_extract.png    # Screenshot if extraction fails (optional)
+```
+
+**Important:**
+- Session directories are created with `0o700` permissions (owner only)
+- `state.json` contains authentication cookies - keep it secure
+- Error screenshots are saved automatically for debugging
 
 ## Architecture
 
-The CLI uses the same services as the Telegram bot:
+### Session Path vs Chat ID
 
-- **PlaywrightService** - Browser automation for Claude interactions
-- **ChatSessionRepository** - Database operations for sessions
-- **TaskRepository** - Task queue management
-- **Settings** - Application configuration
+The CLI uses **session paths** instead of Telegram-specific `chat_id` and `thread_id`:
 
-All operations use the same:
-- Database connections
-- Playwright sessions (stored in `SESSION_DIR`)
-- Configuration (from `.env` or environment variables)
+- **More flexible**: Create sessions anywhere on the filesystem
+- **More portable**: No dependency on Telegram database
+- **More explicit**: Session location is clear from the path
+- **Bot compatible**: Can use sessions created by Telegram bot via `list-chats`
 
-This ensures consistency between bot and CLI operations.
+### Services Used
+
+The CLI uses the same underlying services as the Telegram bot:
+
+- **PlaywrightService** - Browser automation (init, login, code extraction)
+- **ChatSessionRepository** - Database access (only for `list-chats` command)
+- **Settings** - Configuration from environment/`.env`
+
+All browser operations go through PlaywrightService, ensuring consistency between bot and CLI.
 
 ## Troubleshooting
 
 ### "TELEGRAM_TOKEN is required"
 
-Even though the CLI doesn't use the Telegram bot, the Settings class requires it. Set a dummy value:
+The Settings class requires `TELEGRAM_TOKEN` even for CLI. Set a dummy value:
 
 ```bash
-export TELEGRAM_TOKEN=dummy_token_for_cli
+export TELEGRAM_TOKEN=cli_dummy_token
 ```
 
-### "Database connection failed"
+Or in `.env`:
 
-Make sure PostgreSQL is running and `DATABASE_URL` is set correctly:
+```
+TELEGRAM_TOKEN=cli_dummy_token
+```
+
+### "Database connection failed" (for list-chats)
+
+The `list-chats` command requires database access. Ensure PostgreSQL is running and set:
 
 ```bash
 export DATABASE_URL=postgresql+asyncpg://user:pass@localhost/claude_bot
 ```
 
+Other commands (`init-session`, `get-code`, etc.) **do not** require database access.
+
 ### "Session not found"
 
-The session must be initialized first with `account init-session` and completed with `account process-login`.
+Make sure you've run `init-session` and `process-login` before `get-code`:
+
+```bash
+# Must run in order:
+python -m bot.cli account init-session ./session email@example.com
+python -m bot.cli account process-login ./session <login_url>
+python -m bot.cli account get-code ./session <auth_url>  # Now works
+```
+
+### "Session expired or invalid"
+
+If a session expires, simply re-initialize:
+
+```bash
+python -m bot.cli account delete-session ./session --force
+python -m bot.cli account init-session ./session email@example.com
+# ... repeat login process
+```
 
 ### Debug Mode
 
 Enable debug logging to see detailed information:
 
 ```bash
-python -m bot.cli --log-level DEBUG health
+python -m bot.cli --log-level DEBUG account get-code ./session <auth_url>
 ```
 
-## Development
+## Comparison with Telegram Bot
 
-The CLI is located in `bot/cli/`:
+| Feature | CLI | Telegram Bot |
+|---------|-----|--------------|
+| Session creation | `init-session <path>` | `/init_session` in chat |
+| Session storage | Custom path | `chat_id/thread_id` based |
+| Code extraction | Direct command | `/get_code` in chat |
+| Database required | No (except list-chats) | Yes (all operations) |
+| Multi-user | No (single operator) | Yes (per chat/topic) |
+| Authorization | File-based | Chat-based permissions |
 
-```
-bot/cli/
-├── __init__.py           # Package marker
-├── __main__.py          # CLI entry point
-└── commands/            # Command modules
-    ├── account.py       # Account management commands
-    └── health.py        # Health check command
-```
+Use **CLI** for:
+- Personal development workflow
+- Automation and scripting
+- Direct control over session location
+- No Telegram access scenarios
 
-Adding new commands:
-
-1. Create a new file in `bot/cli/commands/`
-2. Define Click commands or groups
-3. Import and register in `bot/cli/__main__.py`
+Use **Telegram Bot** for:
+- Team collaboration
+- Chat-based workflows
+- Multiple independent sessions (per topic)
+- Permission management (admins only)
