@@ -204,7 +204,7 @@ class ChatSessionRepository:
             )
 
             # ON CONFLICT ... DO UPDATE
-            stmt = stmt.on_conflict_do_update(
+            stmt = stmt.on_conflict_do_update(  # type: ignore[assignment]
                 index_elements=["chat_id", "thread_id"],
                 set_={
                     "email": stmt.excluded.email,

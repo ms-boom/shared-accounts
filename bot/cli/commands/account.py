@@ -239,10 +239,10 @@ def list_chats(ctx: click.Context, format: str) -> None:
     settings: Settings = ctx.obj["settings"]
 
     async def _run() -> None:
-        database = Database(settings.DATABASE_URL)
+        database = Database(settings)
 
         try:
-            await database.connect()
+            await database.startup()
 
             async with database.session_maker() as session, session.begin():
                 session_repo = ChatSessionRepository(session)
@@ -294,7 +294,7 @@ def list_chats(ctx: click.Context, format: str) -> None:
             click.echo(f"❌ Failed to list chat sessions: {e}", err=True)
             raise click.Abort() from e
         finally:
-            await database.disconnect()
+            await database.shutdown()
 
     asyncio.run(_run())
 

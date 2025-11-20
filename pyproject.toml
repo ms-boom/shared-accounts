@@ -105,6 +105,7 @@ module = [
     "databases.*",
     "playwright.*",
     "structlog.*",
+    "asyncpg.*",
 ]
 ignore_missing_imports = true
 

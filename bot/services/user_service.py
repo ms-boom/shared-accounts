@@ -21,7 +21,7 @@ class UserService:
             database: Database instance
         """
         self.db = database
-        self.repository = UserRepository(database.get_connection())
+        self.repository = UserRepository(database.get_connection())  # type: ignore[attr-defined]
 
     async def register_user(self, user: TelegramUser) -> dict:
         """

@@ -21,7 +21,7 @@ class GroupService:
             database: Database instance
         """
         self.db = database
-        self.repository = GroupRepository(database.get_connection())
+        self.repository = GroupRepository(database.get_connection())  # type: ignore[attr-defined]
 
     async def register_group(self, chat: Chat) -> dict:
         """
@@ -40,7 +40,7 @@ class GroupService:
             # Update existing group info
             logger.info(f"Updating existing group: {group_id}")
             return await self.repository.update(
-                group_id=group_id,
+                chat_id=group_id,
                 title=chat.title,
                 username=chat.username,
             )
@@ -48,7 +48,7 @@ class GroupService:
             # Create new group
             logger.info(f"Registering new group: {group_id}")
             return await self.repository.create(
-                group_id=group_id,
+                chat_id=group_id,
                 title=chat.title or "Unknown",
                 username=chat.username,
                 chat_type=chat.type,
@@ -93,7 +93,7 @@ class GroupService:
             Updated group data
         """
         return await self.repository.update(
-            group_id=group_id,
+            chat_id=group_id,
             title=title,
             username=username,
         )
