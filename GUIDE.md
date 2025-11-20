@@ -320,6 +320,63 @@ Claude Authorization Bot автоматизирует процесс получ�
 
 ---
 
+## Альтернатива: CLI (Command Line Interface)
+
+Помимо Telegram бота, проект предоставляет интерфейс командной строки (CLI) для получения кодов авторизации напрямую с компьютера, без использования Telegram.
+
+### Когда использовать CLI?
+
+- ✅ Когда нет доступа к Telegram
+- ✅ Для автоматизации и скриптов
+- ✅ При работе с личными сессиями
+- ✅ Для разработчиков и DevOps
+
+### Быстрый старт с CLI
+
+**1. Создать сессию:**
+```bash
+python -m bot.cli account init-session ./my-session user@example.com
+```
+
+**2. Обработать ссылку из email:**
+```bash
+python -m bot.cli account process-login ./my-session "https://claude.ai/login?token=..."
+```
+
+**3. Получить код авторизации:**
+```bash
+python -m bot.cli account get-code ./my-session "https://claude.ai/auth/authorize?..."
+```
+
+### Основные команды CLI
+
+```bash
+# Управление сессиями
+python -m bot.cli account init-session <path> <email>
+python -m bot.cli account process-login <path> <url>
+python -m bot.cli account get-code <path> <url>
+python -m bot.cli account delete-session <path>
+
+# Просмотр сессий бота
+python -m bot.cli account list-chats
+
+# Проверка здоровья системы
+python -m bot.cli health
+```
+
+### Преимущества CLI
+
+- **Гибкость** - создавайте сессии в любом месте на диске
+- **Независимость** - не требует запущенного Telegram бота
+- **Скриптуемость** - легко интегрируется в автоматизацию
+- **Совместимость** - может использовать сессии созданные ботом
+
+### Полная документация CLI
+
+Подробное руководство: `bot/cli/README.md`
+
+---
+
 ## Контакты и поддержка
 
 Если у вас возникли проблемы которые не описаны в этом руководстве:
@@ -332,7 +389,7 @@ Claude Authorization Bot автоматизирует процесс получ�
 
 ## Чек-лист быстрого старта
 
-Используйте этот чек-лист для настройки бота в новой группе:
+### Для Telegram бота:
 
 - [ ] Добавить бота в группу
 - [ ] Выполнить `/init_session <your-email>`
@@ -344,8 +401,18 @@ Claude Authorization Bot автоматизирует процесс получ�
 - [ ] Попробовать `/get_code` с тестовой ссылкой
 - [ ] Готово! 🎉
 
+### Для CLI:
+
+- [ ] Установить зависимости: `uv sync`
+- [ ] Активировать окружение: `source .venv/bin/activate`
+- [ ] Создать сессию: `python -m bot.cli account init-session ./session email@example.com`
+- [ ] Открыть email от Claude
+- [ ] Обработать login ссылку: `python -m bot.cli account process-login ./session <url>`
+- [ ] Получать коды: `python -m bot.cli account get-code ./session <auth_url>`
+- [ ] Готово! 🎉
+
 ---
 
-**Версия:** 1.0
-**Последнее обновление:** 2025-11-17
+**Версия:** 1.1
+**Последнее обновление:** 2025-11-20 (добавлен CLI)
 **Статус:** Актуально
