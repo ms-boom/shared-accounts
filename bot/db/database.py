@@ -50,7 +50,10 @@ async def setup(settings: Settings) -> AsyncEngine:
     """
     if (bind := Session.kw.get("bind")) is not None:
         logger.info("Database has already been initialized. Reusing existing engine.")
-        return bind  # type: ignore[no-any-return]
+        # bind is AsyncEngine but mypy sees it as Any from dict.get()
+        # We know it's AsyncEngine because we only put AsyncEngine there
+        assert isinstance(bind, AsyncEngine), "Session bind must be AsyncEngine"
+        return bind
 
     # Pattern from statements - use CConnection and disable statement caching
     from bot.db.dialect import CConnection

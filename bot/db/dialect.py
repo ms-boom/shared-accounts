@@ -46,7 +46,11 @@ class CustomAsyncpgDialect(sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyn
         ) -> dict | list | str | int | float | bool | None:
             # the byte is the \x01 prefix for jsonb used by PostgreSQL.
             # asyncpg returns it when format='binary'
-            return deserializer(bin_value[1:].decode())  # type: ignore[no-any-return]
+            # deserializer is json.loads which can return any JSON type
+            result: dict | list | str | int | float | bool | None = deserializer(
+                bin_value[1:].decode()
+            )
+            return result
 
         await asyncpg_connection.set_type_codec(
             "jsonb",

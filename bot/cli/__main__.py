@@ -6,7 +6,7 @@ import click
 
 from bot.cli.commands.account import account
 from bot.cli.commands.health import health
-from bot.core.config import Settings
+from bot.core.config import get_settings
 from bot.core.logging_config import setup_logging
 
 
@@ -27,7 +27,7 @@ def cli(ctx: click.Context, log_level: str | None) -> None:
     ctx.ensure_object(dict)
 
     # Load settings
-    settings = Settings()  # type: ignore[call-arg]
+    settings = get_settings()
     ctx.obj["settings"] = settings
 
     # Configure logging

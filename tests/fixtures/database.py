@@ -35,11 +35,12 @@ from sqlalchemy.ext.asyncio import (
 )
 
 import bot.db.database as db  # Import production database module
-
-# Ensure custom dialect is registered
-# Import triggers registration in bot.db.dialect
-import bot.db.dialect  # noqa: F401
+import bot.db.dialect  # Import triggers dialect registration via sa.dialects.registry
 from bot.core.config import Settings
+
+# Ensure custom dialect module is loaded (triggers sa.dialects.registry call)
+# This import has a side effect of registering CustomAsyncpgDialect
+assert bot.db.dialect.CustomAsyncpgDialect is not None
 
 logger = logging.getLogger(__name__)
 

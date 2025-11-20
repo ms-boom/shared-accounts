@@ -5,6 +5,7 @@ Pattern from statements/ - repository accepts session, doesn't manage transactio
 
 import logging
 from datetime import datetime
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -195,7 +196,7 @@ class ChatSessionRepository:
         """
         try:
             # PostgreSQL INSERT ... ON CONFLICT
-            stmt = sa.dialects.postgresql.insert(ChatSession).values(
+            insert_stmt = sa.dialects.postgresql.insert(ChatSession).values(
                 chat_id=chat_id,
                 thread_id=thread_id,
                 email=email,
@@ -204,11 +205,13 @@ class ChatSessionRepository:
             )
 
             # ON CONFLICT ... DO UPDATE
-            stmt = stmt.on_conflict_do_update(  # type: ignore[assignment]
+            # SQLAlchemy stubs have incomplete types for on_conflict_do_update
+            # We use Any here as the method returns proper Insert type at runtime
+            stmt: Any = insert_stmt.on_conflict_do_update(
                 index_elements=["chat_id", "thread_id"],
                 set_={
-                    "email": stmt.excluded.email,
-                    "session_path": stmt.excluded.session_path,
+                    "email": insert_stmt.excluded.email,
+                    "session_path": insert_stmt.excluded.session_path,
                 },
             ).returning(ChatSession)
 

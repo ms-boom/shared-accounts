@@ -1,6 +1,7 @@
 """Service for managing group context in FSM state."""
 
 import logging
+from typing import cast
 
 from aiogram.fsm.context import FSMContext
 
@@ -37,7 +38,8 @@ class GroupContextService:
             Selected group ID or None if not set
         """
         data = await state.get_data()
-        group_id = data.get("selected_group_id")
+        # dict.get() returns Any, but we know it's int | None
+        group_id = cast(int | None, data.get("selected_group_id"))
         logger.debug(f"Retrieved selected group: {group_id}")
         return group_id
 

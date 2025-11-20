@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from playwright.async_api import (
     Browser,
@@ -235,7 +236,8 @@ class SessionManagementService:
 
                 if code_text:
                     logger.info(f"Extracted code for session {session_path}")
-                    return code_text.strip()
+                    # Playwright stubs don't type text_content() correctly
+                    return cast(str, code_text.strip())
                 else:
                     raise BrowserError("Could not find authorization code on page")
 
@@ -248,7 +250,8 @@ class SessionManagementService:
                 raise BrowserError("Authorization code element is empty")
 
             logger.info(f"Extracted code for session {session_path}")
-            return code.strip()
+            # Playwright stubs don't type text_content() correctly
+            return cast(str, code.strip())
 
         except PlaywrightTimeoutError as e:
             logger.error(f"Timeout extracting code for {session_path}: {e}")
