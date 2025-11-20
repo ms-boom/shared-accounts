@@ -9,10 +9,16 @@ This module implements database fixtures with:
 - Allows fixtures to use commit() while maintaining test isolation
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.adapters import DatabasesAdapter
 import sqlalchemy as sa
 import sqlalchemy.event
 import sqlalchemy.ext.asyncio
@@ -257,7 +263,7 @@ async def test_database(test_settings: Settings) -> AsyncGenerator[Database, Non
 @pytest.fixture
 async def test_database_adapter(
     db_session: AsyncSession,
-) -> "DatabasesAdapter":  # type: ignore[name-defined]
+) -> AsyncGenerator[DatabasesAdapter, None]:
     """databases.Database-compatible adapter using db_session.
 
     This fixture provides a databases.Database-compatible interface
@@ -268,4 +274,4 @@ async def test_database_adapter(
     """
     from tests.adapters import DatabasesAdapter
 
-    return DatabasesAdapter(db_session)
+    yield DatabasesAdapter(db_session)

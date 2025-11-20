@@ -31,10 +31,10 @@ def health(ctx: click.Context, format: str) -> None:
     settings: Settings = ctx.obj["settings"]
 
     async def _run() -> None:
-        database = Database(settings.DATABASE_URL)
+        database = Database(settings)
 
         try:
-            await database.connect()
+            await database.startup()
 
             async with database.session_maker() as session, session.begin():
                 # Check database connection
@@ -127,8 +127,8 @@ def health(ctx: click.Context, format: str) -> None:
         except Exception as e:
             logger.error(f"Health check failed: {e}", exc_info=True)
             click.echo(f"❌ Health check failed: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         finally:
-            await database.disconnect()
+            await database.shutdown()
 
     asyncio.run(_run())

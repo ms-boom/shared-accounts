@@ -105,9 +105,7 @@ class TaskWorker:
         Args:
             task: Task data from database
         """
-        task_id: UUID = (
-            task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
-        )
+        task_id: UUID = task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
         task_type = task["task_type"]
         chat_id = task["chat_id"]
         thread_id = task.get("thread_id", 0)

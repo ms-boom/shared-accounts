@@ -50,7 +50,7 @@ async def setup(settings: Settings) -> AsyncEngine:
     """
     if (bind := Session.kw.get("bind")) is not None:
         logger.info("Database has already been initialized. Reusing existing engine.")
-        return bind
+        return bind  # type: ignore[no-any-return]
 
     # Pattern from statements - use CConnection and disable statement caching
     from bot.db.dialect import CConnection

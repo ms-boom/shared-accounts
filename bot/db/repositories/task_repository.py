@@ -283,9 +283,7 @@ class TaskRepository:
 
             stmt = (
                 sa.update(Task)
-                .where(
-                    Task.status == "processing", Task.updated_at < timeout_threshold
-                )
+                .where(Task.status == "processing", Task.updated_at < timeout_threshold)
                 .values(
                     status="pending",
                     version=Task.version + 1,
