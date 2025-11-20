@@ -1,7 +1,6 @@
 """Handlers for Claude Authorization Bot commands."""
 
 import logging
-import re
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -11,20 +10,11 @@ from bot.core.config import Settings
 from bot.db.database import Database
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
 from bot.db.repositories.task_repository import TaskRepository
+from bot.services.validation_service import ValidationService
 
 logger = logging.getLogger(__name__)
 
 router = Router(name="claude_auth")
-
-
-# Email validation regex
-EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-
-# Claude URL patterns
-CLAUDE_LOGIN_URL_PATTERN = re.compile(r"https://claude\.ai/login\?token=.+")
-CLAUDE_AUTH_URL_PATTERN = re.compile(
-    r"https://claude\.ai/(auth/authorize|login/authorize)\?.+"
-)
 
 
 def get_thread_id(message: Message) -> int:
@@ -38,21 +28,6 @@ def get_thread_id(message: Message) -> int:
         thread_id (0 for main chat, >0 for topics)
     """
     return message.message_thread_id if message.message_thread_id else 0
-
-
-def validate_email(email: str) -> bool:
-    """Validate email format."""
-    return bool(EMAIL_REGEX.match(email))
-
-
-def is_claude_login_url(url: str) -> bool:
-    """Check if URL is a Claude login link."""
-    return bool(CLAUDE_LOGIN_URL_PATTERN.match(url))
-
-
-def is_claude_auth_url(url: str) -> bool:
-    """Check if URL is a Claude authorization URL."""
-    return bool(CLAUDE_AUTH_URL_PATTERN.match(url))
 
 
 @router.message(Command("init_session"))
@@ -109,7 +84,7 @@ async def init_session_handler(
     email = parts[1].strip()
 
     # Validate email
-    if not validate_email(email):
+    if not ValidationService.validate_email(email):
         await message.reply(
             "❌ Invalid email format. Please provide a valid email address."
         )
@@ -201,7 +176,7 @@ async def get_code_handler(
         auth_url = parts[1].strip()
 
         # Validate URL
-        if not is_claude_auth_url(auth_url):
+        if not ValidationService.is_claude_auth_url(auth_url):
             await message.reply(
                 "❌ Invalid auth URL format. Please provide a valid Claude authorization URL.\n\n"
                 "Expected format: https://claude.ai/auth/authorize?..."
@@ -314,7 +289,7 @@ async def handle_claude_url(
         return
 
     # Check if message contains Claude login URL
-    if not is_claude_login_url(message.text.strip()):
+    if not ValidationService.is_claude_login_url(message.text.strip()):
         return
 
     login_url = message.text.strip()

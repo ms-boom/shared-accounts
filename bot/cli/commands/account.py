@@ -11,6 +11,7 @@ from bot.core.config import Settings
 from bot.core.exceptions import BrowserError, SessionError
 from bot.db.database import Database
 from bot.db.repositories.chat_session_repository import ChatSessionRepository
+from bot.services.validation_service import ValidationService
 from bot.worker.playwright_service import PlaywrightService
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,11 @@ def init_session(ctx: click.Context, session_path: str, email: str) -> None:
     settings: Settings = ctx.obj["settings"]
     session_dir = Path(session_path)
 
+    # Validate email
+    if not ValidationService.validate_email(email):
+        click.echo("❌ Invalid email format. Please provide a valid email address.", err=True)
+        raise click.Abort()
+
     click.echo(f"🔄 Initializing session for {email}")
     click.echo(f"📁 Session path: {session_dir}")
 
@@ -60,9 +66,12 @@ def init_session(ctx: click.Context, session_path: str, email: str) -> None:
             # Create session directory
             session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-            # Initialize session using path directly
-            message = await _initialize_session_at_path(
-                playwright_service, session_dir, email
+            # Initialize session using SessionManagementService
+            if playwright_service._session_service is None:
+                raise BrowserError("Browser not initialized")
+
+            message = await playwright_service._session_service.initialize_session(
+                session_dir, email
             )
 
             click.echo(f"✅ {message}")
@@ -74,89 +83,15 @@ def init_session(ctx: click.Context, session_path: str, email: str) -> None:
 
         except BrowserError as e:
             click.echo(f"❌ Browser error: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         except Exception as e:
             logger.error(f"Failed to initialize session: {e}", exc_info=True)
             click.echo(f"❌ Failed to initialize session: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         finally:
             await playwright_service.stop()
 
     asyncio.run(_run())
-
-
-async def _initialize_session_at_path(
-    playwright_service: PlaywrightService, session_path: Path, email: str
-) -> str:
-    """
-    Initialize Claude session at specific path.
-
-    Args:
-        playwright_service: Playwright service instance
-        session_path: Path to store session
-        email: Email address for Claude account
-
-    Returns:
-        Success message
-    """
-    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-
-    context = None
-    page = None
-
-    try:
-        if playwright_service.browser is None:
-            raise BrowserError("Browser not initialized. Call start() first.")
-
-        context = await playwright_service.browser.new_context(
-            storage_state=None,
-            viewport={"width": 1280, "height": 720},
-        )
-
-        page = await context.new_page()
-
-        # Navigate to Claude login page
-        await page.goto(
-            "https://claude.ai/login",
-            timeout=playwright_service.settings.PLAYWRIGHT_TIMEOUT,
-        )
-        logger.info(f"Opened login page for session {session_path}")
-
-        # Fill email field
-        email_input = page.locator('input[type="email"]')
-        await email_input.fill(email)
-        logger.info(f"Filled email for session {session_path}")
-
-        # Click "Continue with email" button
-        continue_button = page.locator('button:has-text("Continue with email")')
-        await continue_button.click()
-
-        # Wait for "Check your email" message
-        await page.wait_for_selector(
-            'text="Check your email"',
-            timeout=playwright_service.settings.PLAYWRIGHT_TIMEOUT,
-        )
-        logger.info(f"Email sent confirmation for session {session_path}")
-
-        # Save session state
-        await context.storage_state(path=str(session_path / "state.json"))
-
-        return "📧 Email sent! Please check your inbox for the authorization link."
-
-    except PlaywrightTimeoutError as e:
-        logger.error(f"Timeout during session init for {session_path}: {e}")
-        if page:
-            screenshot_path = session_path / "error_init.png"
-            await page.screenshot(path=str(screenshot_path))
-        raise BrowserError(
-            "❌ Operation timed out. The page took too long to respond."
-        ) from e
-    except Exception as e:
-        logger.error(f"Failed to initialize session at {session_path}: {e}")
-        raise BrowserError(f"❌ Failed to initialize session: {str(e)}") from e
-    finally:
-        if context:
-            await context.close()
 
 
 @account.command("process-login")
@@ -177,7 +112,12 @@ def process_login(ctx: click.Context, session_path: str, login_url: str) -> None
     settings: Settings = ctx.obj["settings"]
     session_dir = Path(session_path)
 
-    click.echo(f"🔄 Processing login link")
+    # Validate login URL
+    if not ValidationService.is_claude_login_url(login_url):
+        click.echo("❌ Invalid Claude login URL format.", err=True)
+        raise click.Abort()
+
+    click.echo("🔄 Processing login link")
     click.echo(f"📁 Session: {session_dir}")
 
     async def _run() -> None:
@@ -186,8 +126,12 @@ def process_login(ctx: click.Context, session_path: str, login_url: str) -> None
         try:
             await playwright_service.start()
 
-            message = await _process_login_at_path(
-                playwright_service, session_dir, login_url
+            # Use SessionManagementService
+            if playwright_service._session_service is None:
+                raise BrowserError("Browser not initialized")
+
+            message = await playwright_service._session_service.process_login(
+                session_dir, login_url
             )
 
             click.echo(f"✅ {message}")
@@ -198,85 +142,18 @@ def process_login(ctx: click.Context, session_path: str, login_url: str) -> None
 
         except SessionError as e:
             click.echo(f"❌ Session error: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         except BrowserError as e:
             click.echo(f"❌ Browser error: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         except Exception as e:
             logger.error(f"Failed to process login link: {e}", exc_info=True)
             click.echo(f"❌ Failed to process login link: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         finally:
             await playwright_service.stop()
 
     asyncio.run(_run())
-
-
-async def _process_login_at_path(
-    playwright_service: PlaywrightService, session_path: Path, login_url: str
-) -> str:
-    """
-    Process Claude login link at specific path.
-
-    Args:
-        playwright_service: Playwright service instance
-        session_path: Path to session directory
-        login_url: Login URL from email
-
-    Returns:
-        Success message
-    """
-    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-
-    state_file = session_path / "state.json"
-    if not state_file.exists():
-        raise SessionError(
-            f"❌ No session found at {session_path}. Run init-session first."
-        )
-
-    context = None
-    page = None
-
-    try:
-        if playwright_service.browser is None:
-            raise BrowserError("Browser not initialized. Call start() first.")
-
-        context = await playwright_service.browser.new_context(
-            storage_state=str(state_file),
-        )
-
-        page = await context.new_page()
-
-        # Open login link
-        await page.goto(login_url, timeout=playwright_service.settings.PLAYWRIGHT_TIMEOUT)
-
-        # Wait for successful authentication
-        await page.wait_for_selector(
-            'button[aria-label="User menu"], [data-testid="user-menu"]',
-            timeout=playwright_service.settings.PLAYWRIGHT_TIMEOUT,
-            state="visible",
-        )
-        logger.info(f"Authentication successful for session {session_path}")
-
-        # Save authenticated session
-        await context.storage_state(path=str(state_file))
-
-        return "Session authenticated successfully!"
-
-    except PlaywrightTimeoutError as e:
-        logger.error(f"Timeout during login for {session_path}: {e}")
-        if page:
-            screenshot_path = session_path / "error_login.png"
-            await page.screenshot(path=str(screenshot_path))
-        raise BrowserError(
-            "❌ Login link is invalid or expired. Please run init-session again."
-        ) from e
-    except Exception as e:
-        logger.error(f"Failed to process login link for {session_path}: {e}")
-        raise BrowserError(f"❌ Failed to process login link: {str(e)}") from e
-    finally:
-        if context:
-            await context.close()
 
 
 @account.command("get-code")
@@ -297,7 +174,12 @@ def get_code(ctx: click.Context, session_path: str, auth_url: str) -> None:
     settings: Settings = ctx.obj["settings"]
     session_dir = Path(session_path)
 
-    click.echo(f"🔄 Extracting authorization code")
+    # Validate authorization URL
+    if not ValidationService.is_claude_auth_url(auth_url):
+        click.echo("❌ Invalid Claude authorization URL format.", err=True)
+        raise click.Abort()
+
+    click.echo("🔄 Extracting authorization code")
     click.echo(f"📁 Session: {session_dir}")
 
     async def _run() -> None:
@@ -306,138 +188,32 @@ def get_code(ctx: click.Context, session_path: str, auth_url: str) -> None:
         try:
             await playwright_service.start()
 
-            code = await _extract_code_at_path(
-                playwright_service, session_dir, auth_url
+            # Use SessionManagementService
+            if playwright_service._session_service is None:
+                raise BrowserError("Browser not initialized")
+
+            code = await playwright_service._session_service.extract_code(
+                session_dir, auth_url
             )
 
-            click.echo(f"\n✅ Authorization code:\n")
+            click.echo("\n✅ Authorization code:\n")
             click.echo(f"    {code}\n")
             click.echo("Copy this code and paste it into Claude Code CLI.")
 
         except SessionError as e:
             click.echo(f"❌ Session error: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         except BrowserError as e:
             click.echo(f"❌ Browser error: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         except Exception as e:
             logger.error(f"Failed to extract code: {e}", exc_info=True)
             click.echo(f"❌ Failed to extract code: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         finally:
             await playwright_service.stop()
 
     asyncio.run(_run())
-
-
-async def _extract_code_at_path(
-    playwright_service: PlaywrightService, session_path: Path, auth_url: str
-) -> str:
-    """
-    Extract authorization code at specific path.
-
-    Args:
-        playwright_service: Playwright service instance
-        session_path: Path to session directory
-        auth_url: Authorization URL from Claude Code
-
-    Returns:
-        Authorization code
-    """
-    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-
-    state_file = session_path / "state.json"
-    if not state_file.exists():
-        raise SessionError(
-            f"❌ No active session found at {session_path}. Run init-session first."
-        )
-
-    context = None
-    page = None
-
-    try:
-        if playwright_service.browser is None:
-            raise BrowserError("Browser not initialized. Call start() first.")
-
-        context = await playwright_service.browser.new_context(
-            storage_state=str(state_file),
-        )
-
-        page = await context.new_page()
-
-        # Navigate to authorization URL
-        await page.goto(auth_url, timeout=playwright_service.settings.PLAYWRIGHT_TIMEOUT)
-
-        # Wait for authorization code element
-        code_element = None
-        selectors = [
-            "code",
-            '[data-testid="auth-code"]',
-            'input[name="code"]',
-            "div.auth-code",
-            "pre.code",
-        ]
-
-        for selector in selectors:
-            try:
-                code_element = page.locator(selector).first
-                await code_element.wait_for(
-                    timeout=5000,
-                    state="visible",
-                )
-                break
-            except PlaywrightTimeoutError:
-                continue
-
-        if not code_element:
-            # Try to find any code-like text
-            await page.wait_for_load_state("networkidle")
-            code_text = await page.locator("text=/^[A-Z0-9]{8,}$/").first.text_content()
-
-            if code_text:
-                logger.info(f"Extracted code for session {session_path}")
-                return code_text.strip()
-            else:
-                raise BrowserError("Could not find authorization code on page")
-
-        # Extract code text
-        code = await code_element.text_content()
-        if not code:
-            code = await code_element.get_attribute("value")
-
-        if not code:
-            raise BrowserError("Authorization code element is empty")
-
-        logger.info(f"Extracted code for session {session_path}")
-        return code.strip()
-
-    except PlaywrightTimeoutError as e:
-        logger.error(f"Timeout extracting code for {session_path}: {e}")
-        if page:
-            screenshot_path = session_path / "error_extract.png"
-            await page.screenshot(path=str(screenshot_path))
-        raise BrowserError(
-            "❌ Operation timed out. Could not extract authorization code."
-        ) from e
-    except SessionError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to extract code for {session_path}: {e}")
-
-        # Check if session is invalid
-        if "401" in str(e) or "403" in str(e) or "unauthorized" in str(e).lower():
-            if state_file.exists():
-                state_file.unlink()
-            raise SessionError(
-                f"❌ Session expired or invalid at {session_path}. Please run init-session again."
-            ) from e
-
-        raise BrowserError(
-            f"❌ Could not extract authorization code: {str(e)}"
-        ) from e
-    finally:
-        if context:
-            await context.close()
 
 
 @account.command("list-chats")
@@ -507,14 +283,14 @@ def list_chats(ctx: click.Context, format: str) -> None:
 
                     click.echo(f"\nTotal chats: {len(sessions)}")
                     click.echo(
-                        f"\nUse session paths with other commands:\n"
-                        f"  python -m bot.cli account get-code <session_path> <auth_url>"
+                        "\nUse session paths with other commands:\n"
+                        "  python -m bot.cli account get-code <session_path> <auth_url>"
                     )
 
         except Exception as e:
             logger.error(f"Failed to list chat sessions: {e}", exc_info=True)
             click.echo(f"❌ Failed to list chat sessions: {e}", err=True)
-            raise click.Abort()
+            raise click.Abort() from e
         finally:
             await database.disconnect()
 
@@ -555,4 +331,4 @@ def delete_session(ctx: click.Context, session_path: str, force: bool) -> None:
     except Exception as e:
         logger.error(f"Failed to delete session: {e}", exc_info=True)
         click.echo(f"❌ Failed to delete session: {e}", err=True)
-        raise click.Abort()
+        raise click.Abort() from e
