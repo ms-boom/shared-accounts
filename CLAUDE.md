@@ -628,19 +628,28 @@ python -m bot.cli account process-login ./my-session "https://claude.ai/login?to
 python -m bot.cli account get-code ./my-session "https://claude.ai/auth/authorize?..."
 ```
 
+### Глобальные опции
+
+```bash
+python -m bot.cli [OPTIONS] COMMAND [ARGS]...
+
+--log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]  Set logging level
+```
+
 ### Основные команды
 
 **account** - Управление сессиями через пути:
 - `init-session <path> <email>` - Создать сессию по указанному пути
 - `process-login <path> <url>` - Обработать login ссылку из email
 - `get-code <path> <url>` - Извлечь код авторизации
-- `list-chats` - Список сессий из БД бота (table/json)
-- `delete-session <path>` - Удалить сессию
+- `list-chats [--format table|json]` - Список сессий из БД бота
+- `delete-session <path> [--force]` - Удалить сессию
 
 **health** - Проверка состояния системы:
-- Database connection status
-- Активные сессии
-- Количество pending задач
+- `health [--format text|json]` - Проверка статуса системы
+  - Database connection status
+  - Активные сессии
+  - Количество pending задач
 
 ### Примеры использования
 
@@ -658,6 +667,18 @@ python -m bot.cli account get-code /data/sessions/123456789 <auth_url>
 for url in $(cat urls.txt); do
   python -m bot.cli account get-code ./session "$url"
 done
+
+# JSON output для скриптов
+python -m bot.cli account list-chats --format json | jq '.[] | select(.email=="user@example.com")'
+python -m bot.cli health --format json | jq '.status'
+
+# Debug режим
+python -m bot.cli --log-level DEBUG account get-code ./session <auth_url>
+
+# Автоматизация с проверкой здоровья
+if python -m bot.cli health --format json | jq -e '.status == "healthy"'; then
+  python -m bot.cli account get-code ./session <auth_url>
+fi
 ```
 
 ### Архитектура CLI

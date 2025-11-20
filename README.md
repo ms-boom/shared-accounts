@@ -251,6 +251,79 @@ Once the bot is running, use these commands in Telegram:
 
 **Topics Support**: All commands work in both main chat and topics. Each topic gets an independent session isolated from others.
 
+## CLI Usage
+
+In addition to the Telegram bot, the project provides a command-line interface for direct session management.
+
+### Quick Start
+
+```bash
+# Initialize new session
+python -m bot.cli account init-session ./my-session user@example.com
+
+# Process login link from email
+python -m bot.cli account process-login ./my-session "https://claude.ai/login?token=..."
+
+# Get authorization code
+python -m bot.cli account get-code ./my-session "https://claude.ai/auth/authorize?..."
+
+# List bot-managed sessions
+python -m bot.cli account list-chats
+
+# Check system health
+python -m bot.cli health
+```
+
+### Key Features
+
+- **Path-based sessions**: Create sessions anywhere on filesystem
+- **No Telegram required**: Direct access to Playwright automation
+- **Batch operations**: Script multiple authorization requests
+- **Bot compatibility**: Can use sessions created by Telegram bot
+
+### Available Commands
+
+**account** - Session management:
+- `init-session <path> <email>` - Initialize new session
+- `process-login <path> <url>` - Complete authentication
+- `get-code <path> <url>` - Extract authorization code
+- `list-chats` - List bot-managed sessions
+- `delete-session <path>` - Remove session
+
+**health** - System monitoring:
+- Check database connection
+- Show active sessions count
+- Display pending tasks
+
+### Use Cases
+
+**CLI-Only Workflow** (no Telegram):
+```bash
+# Create and manage sessions entirely from command line
+python -m bot.cli account init-session ~/sessions/work work@company.com
+python -m bot.cli account process-login ~/sessions/work <login_url>
+python -m bot.cli account get-code ~/sessions/work <auth_url>
+```
+
+**Using Bot Sessions via CLI**:
+```bash
+# Find session path from bot
+python -m bot.cli account list-chats
+
+# Use bot's session
+python -m bot.cli account get-code /data/sessions/123456789 <auth_url>
+```
+
+**Batch Processing**:
+```bash
+# Extract codes for multiple URLs
+for url in $(cat urls.txt); do
+  python -m bot.cli account get-code ./session "$url"
+done
+```
+
+For complete CLI documentation, see [bot/cli/README.md](bot/cli/README.md).
+
 ## Configuration
 
 All configuration is done via environment variables in `.env`:
