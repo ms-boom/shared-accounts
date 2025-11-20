@@ -60,6 +60,12 @@
 │   │   ├── __main__.py           # Entry point для worker
 │   │   ├── task_worker.py        # Основной worker с очередью
 │   │   └── playwright_service.py # Работа с headless браузером
+│   ├── cli/                       # CLI interface (Command Line)
+│   │   ├── __main__.py           # CLI entry point
+│   │   ├── README.md             # CLI документация
+│   │   └── commands/             # CLI команды
+│   │       ├── account.py        # Управление сессиями
+│   │       └── health.py         # Проверка здоровья системы
 │   └── __main__.py               # Entry point для бота
 │
 ├── migrations/                    # Alembic миграции
@@ -593,6 +599,67 @@ async def init_session_handler(message: Message, database: Database):
 
 ---
 
+## CLI (Command Line Interface)
+
+В дополнение к Telegram боту, проект предоставляет полнофункциональный CLI для управления сессиями напрямую из командной строки.
+
+### Возможности CLI
+
+- **Управление сессиями** - инициализация, удаление, просмотр списка сессий
+- **Получение кодов авторизации** - извлечение кодов без использования Telegram
+- **Проверка здоровья системы** - мониторинг БД, сессий, задач
+- **Интеграция со скриптами** - JSON output для автоматизации
+
+### Использование
+
+```bash
+# Установка зависимостей
+uv sync
+source .venv/bin/activate
+
+# Проверка здоровья системы
+python -m bot.cli health
+
+# Инициализация новой сессии
+python -m bot.cli account init-session 123456789 0 user@example.com
+
+# Список всех сессий
+python -m bot.cli account list-sessions
+
+# Получение кода авторизации
+python -m bot.cli account get-code 123456789 0 "https://claude.ai/auth/authorize?..."
+```
+
+### Доступные команды
+
+**account** - Управление сессиями Claude:
+- `init-session` - Инициализировать новую сессию
+- `process-login` - Обработать login ссылку из email
+- `get-code` - Извлечь код авторизации
+- `list-sessions` - Список всех сессий (table/json)
+- `delete-session` - Удалить сессию
+
+**health** - Проверка состояния системы:
+- Database connection status
+- Активные сессии
+- Количество pending задач
+
+### Архитектура CLI
+
+CLI использует те же сервисы, что и Telegram бот:
+- **PlaywrightService** - автоматизация браузера
+- **ChatSessionRepository** - работа с БД сессий
+- **TaskRepository** - управление очередью задач
+- **Settings** - конфигурация приложения
+
+Это обеспечивает полную согласованность между bot и CLI операциями.
+
+### Документация
+
+Подробная документация CLI: `bot/cli/README.md`
+
+---
+
 ## Окружение и деплой
 
 ### Docker Compose
@@ -636,6 +703,6 @@ PERMISSION_CACHE_TTL=300
 
 ---
 
-**Версия документа:** 1.0
+**Версия документа:** 1.1
 **Дата создания:** 2025-11-17
-**Последнее обновление:** 2025-11-17
+**Последнее обновление:** 2025-11-20 (добавлен CLI)

@@ -17,7 +17,11 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "playwright>=1.40.0",
     "structlog>=23.0.0",
+    "click>=8.1.7",
 ]
+
+[project.scripts]
+claude-bot = "bot.cli.__main__:cli"
 
 [dependency-groups]
 dev = [
