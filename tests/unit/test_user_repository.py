@@ -1,10 +1,10 @@
 """Unit tests for bot/db/repositories/user_repository.py."""
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import UserNotFoundError
 from bot.db.repositories.user_repository import UserRepository
-from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -12,19 +12,17 @@ class TestUserRepository:
     """Tests for UserRepository class."""
 
     @pytest.fixture
-    def user_repository(
-        self, test_database_adapter: DatabasesAdapter
-    ) -> UserRepository:
+    def user_repository(self, db_session: AsyncSession) -> UserRepository:
         """
         Create UserRepository instance for testing.
 
         Args:
-            test_database_adapter: Test database adapter using db_session
+            db_session: SQLAlchemy async session
 
         Returns:
             UserRepository instance
         """
-        return UserRepository(test_database_adapter)
+        return UserRepository(db_session)
 
     async def test_creates_user(self, user_repository: UserRepository) -> None:
         """Test creating a new user."""

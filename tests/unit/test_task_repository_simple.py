@@ -1,16 +1,13 @@
 """Simplified unit tests for bot/db/repositories/task_repository.py.
 
-Note: Some tests are skipped because they require PostgreSQL-specific features:
-- JSONB type for payload
-- FOR UPDATE SKIP LOCKED for concurrent task processing
-
-For full integration testing, use PostgreSQL database.
+Note: Tests now use SQLAlchemy AsyncSession with SQLite support.
+SQLite-compatible tests run with real database transactions.
 """
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.repositories.task_repository import TaskRepository
-from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -18,9 +15,9 @@ class TestTaskRepositoryBasic:
     """Basic tests for TaskRepository (SQLite compatible)."""
 
     @pytest.fixture
-    def task_repository(self, test_database_adapter: DatabasesAdapter):
+    def task_repository(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
 
     async def test_gets_pending_count_initially_zero(
         self, task_repository: TaskRepository
@@ -45,14 +42,14 @@ class TestTaskRepositoryBasic:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration tests require PostgreSQL database")
+@pytest.mark.skip(reason="Integration tests skipped - use SQLite basic tests")
 class TestTaskRepositoryIntegration:
-    """Integration tests for TaskRepository with PostgreSQL.
+    """Integration tests for TaskRepository.
 
-    These tests should be run against real PostgreSQL database.
+    These tests are skipped in favor of SQLite-compatible basic tests.
     """
 
     @pytest.fixture
-    def task_repository(self, test_database_adapter: DatabasesAdapter):
+    def task_repository(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
