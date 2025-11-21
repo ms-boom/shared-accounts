@@ -3,8 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, Index, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy import BigInteger, DateTime, Index, JSON, String, Text, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -173,16 +172,16 @@ class Task(Base):
     Background task queue entry.
 
     Tasks are processed asynchronously by worker service.
-    Uses PostgreSQL row-level locking for safe concurrent processing.
+    Uses database row-level locking for safe concurrent processing.
     """
 
     __tablename__ = "tasks"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+    id: Mapped[str] = mapped_column(
+        String(36),
         primary_key=True,
-        default=uuid4,
-        comment="Unique task ID",
+        default=lambda: str(uuid4()),
+        comment="Unique task ID (UUID as string)",
     )
     chat_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -207,7 +206,7 @@ class Task(Base):
         comment="Task type: 'init_session' or 'get_code'",
     )
     payload: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
         comment="Task-specific payload (email, url, etc.)",
     )
@@ -243,10 +242,13 @@ class Task(Base):
     )
 
     __table_args__ = (
+        # Partial index for pending tasks
+        # SQLite supports partial indexes with WHERE clause
         Index(
             "idx_tasks_pending_status",
             "status",
-            postgresql_where=lambda: Task.status == "pending",
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
         ),
     )
 
@@ -286,7 +288,7 @@ class FSMState(Base):
         comment="Current FSM state (None if no active state)",
     )
     data: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
         server_default="{}",
         comment="State data storage (JSON)",

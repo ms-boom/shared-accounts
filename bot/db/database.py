@@ -42,6 +42,8 @@ async def setup(settings: Settings) -> AsyncEngine:
     This should be called once at application startup.
     Pattern from statements/db.py with simplified pool settings.
 
+    Supports both PostgreSQL (asyncpg) and SQLite (aiosqlite).
+
     Args:
         settings: Application settings
 
@@ -55,21 +57,42 @@ async def setup(settings: Settings) -> AsyncEngine:
         assert isinstance(bind, AsyncEngine), "Session bind must be AsyncEngine"
         return bind
 
-    # Pattern from statements - use CConnection and disable statement caching
-    from bot.db.dialect import CConnection
+    # Detect database type from URL
+    db_url = settings.DATABASE_URL.lower()
+    is_sqlite = db_url.startswith("sqlite")
+    is_postgres = "postgres" in db_url
 
-    connect_args = {
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-        "connection_class": CConnection,
-    }
+    # Configure connect_args based on database type
+    connect_args: dict = {}
+
+    if is_postgres:
+        # PostgreSQL-specific configuration
+        from bot.db.dialect import CConnection
+
+        connect_args = {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+            "connection_class": CConnection,
+        }
+        logger.info("Using PostgreSQL database with asyncpg driver")
+
+    elif is_sqlite:
+        # SQLite-specific configuration
+        connect_args = {
+            "check_same_thread": False,  # Allow usage across threads
+        }
+        logger.info("Using SQLite database with aiosqlite driver")
 
     # Create engine with connection pooling
+    # SQLite doesn't need large pool, use smaller values
+    pool_size = 1 if is_sqlite else 5
+    max_overflow = 0 if is_sqlite else 10
+
     engine = create_async_engine(
         settings.DATABASE_URL,
         echo=False,  # Set to True for SQL debugging
-        pool_size=5,  # Number of connections to keep in pool
-        max_overflow=10,  # Maximum overflow connections
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         pool_timeout=30,  # Seconds to wait for connection from pool
         pool_recycle=3600,  # Recycle connections after 1 hour
         pool_pre_ping=False,  # Match statements settings
@@ -78,7 +101,10 @@ async def setup(settings: Settings) -> AsyncEngine:
 
     # Configure global Session with engine
     Session.configure(bind=engine)
-    logger.info("Database initialized with connection pool (size=5, max_overflow=10)")
+    logger.info(
+        f"Database initialized with connection pool "
+        f"(size={pool_size}, max_overflow={max_overflow})"
+    )
 
     return engine
 
