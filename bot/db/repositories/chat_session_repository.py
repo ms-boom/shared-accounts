@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
@@ -196,7 +197,7 @@ class ChatSessionRepository:
         """
         try:
             # PostgreSQL INSERT ... ON CONFLICT
-            insert_stmt = sa.dialects.postgresql.insert(ChatSession).values(
+            insert_stmt = pg_insert(ChatSession).values(
                 chat_id=chat_id,
                 thread_id=thread_id,
                 email=email,
