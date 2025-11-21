@@ -227,6 +227,8 @@ async def db_savepoint(
         nonlocal savepoint
         if not savepoint.is_active:
             # Event listener is called synchronously, use sync_connection
+            if db_connection.sync_connection is None:
+                raise RuntimeError("sync_connection is None")
             savepoint = db_connection.sync_connection.begin_nested()
 
     sa.event.listen(sa.orm.Session, "after_transaction_end", on_release_savepoint)
@@ -244,7 +246,7 @@ def db_sessionmaker(db_savepoint: None) -> async_sessionmaker[AsyncSession]:
 
     Pattern from statements/ - use production Session
     """
-    return db.Session
+    return db.Session  # type: ignore[return-value]
 
 
 @pytest.fixture(scope="function")

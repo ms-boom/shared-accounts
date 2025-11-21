@@ -95,10 +95,10 @@ class TestSettings:
 
         settings = Settings(
             TELEGRAM_TOKEN="123456:test",
-            DATA_DIR="/tmp/data",
-            SESSION_DIR="/tmp/sessions",
-            LOG_DIR="/tmp/logs",
-            ERROR_DIR="/tmp/errors",
+            DATA_DIR=Path("/tmp/data"),
+            SESSION_DIR=Path("/tmp/sessions"),
+            LOG_DIR=Path("/tmp/logs"),
+            ERROR_DIR=Path("/tmp/errors"),
         )
 
         assert isinstance(settings.DATA_DIR, Path)

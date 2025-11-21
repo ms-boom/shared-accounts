@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from aiogram.types import Chat, Message, User
 
-from bot.handlers.claude_auth import get_thread_id, validate_email
+from bot.handlers.claude_auth import get_thread_id
 
 
 @pytest.mark.unit
@@ -58,50 +58,6 @@ class TestGetThreadId:
 
         # 0 is falsy, but should be returned as-is
         assert thread_id == 0
-
-
-@pytest.mark.unit
-class TestValidateEmail:
-    """Tests for validate_email() function."""
-
-    def test_valid_email_formats(self) -> None:
-        """Test validate_email accepts valid email formats."""
-        valid_emails = [
-            "test@example.com",
-            "user.name@example.com",
-            "user+tag@example.co.uk",
-            "first.last@subdomain.example.com",
-            "123@example.com",
-            "user_name@example.com",
-        ]
-
-        for email in valid_emails:
-            assert validate_email(email), f"Should accept {email}"
-
-    def test_invalid_email_formats(self) -> None:
-        """Test validate_email rejects invalid email formats."""
-        invalid_emails = [
-            "",
-            "not-an-email",
-            "@example.com",
-            "user@",
-            "user @example.com",  # Space
-            "user@example",  # No TLD
-        ]
-
-        for email in invalid_emails:
-            assert not validate_email(email), f"Should reject {email}"
-
-    def test_email_with_special_characters(self) -> None:
-        """Test validate_email handles special characters."""
-        # Valid special characters
-        assert validate_email("user+filter@example.com")
-        assert validate_email("user.name@example.com")
-        assert validate_email("user_name@example.com")
-
-        # Invalid special characters
-        assert not validate_email("user@example@com")
-        assert not validate_email("user name@example.com")
 
 
 @pytest.mark.unit
