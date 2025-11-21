@@ -1,9 +1,9 @@
 """Unit tests for TaskRepository with thread_id support."""
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.repositories.task_repository import TaskRepository
-from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -11,9 +11,9 @@ class TestTaskRepositoryThreadId:
     """Tests for TaskRepository thread_id functionality."""
 
     @pytest.fixture
-    def task_repo(self, test_database_adapter: DatabasesAdapter):
+    async def task_repo(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
 
     async def test_create_task_with_default_thread_id(
         self, task_repo: TaskRepository
@@ -101,9 +101,9 @@ class TestTaskRepositoryThreadIdIntegration:
     """
 
     @pytest.fixture
-    def task_repo(self, test_database_adapter: DatabasesAdapter):
+    async def task_repo(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
 
     async def test_tasks_isolated_by_thread_id(self, task_repo: TaskRepository) -> None:
         """Test that tasks with different thread_id are independent."""
@@ -198,6 +198,7 @@ class TestTaskRepositoryThreadIdIntegration:
         updated = await task_repo.update_status(
             task_id=created["id"],
             status="processing",
+            expected_version=created["version"],
         )
 
         assert updated is not None

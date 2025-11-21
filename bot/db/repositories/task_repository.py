@@ -181,7 +181,9 @@ class TaskRepository:
         """
         try:
             # Detect database type from session bind
-            dialect_name = self.session.bind.dialect.name if self.session.bind else "sqlite"
+            dialect_name = (
+                self.session.bind.dialect.name if self.session.bind else "sqlite"
+            )
 
             # Select and lock the next pending task
             stmt = (

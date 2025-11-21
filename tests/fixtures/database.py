@@ -210,28 +210,22 @@ async def db_transaction(db_connection: AsyncConnection) -> AsyncGenerator[None,
 async def db_savepoint(
     db_transaction: None, db_connection: AsyncConnection
 ) -> AsyncGenerator[None, None]:
-    """Savepoint with automatic recreation after commit.
+    """Savepoint for test isolation.
 
-    This fixture creates a SAVEPOINT and registers an event listener
-    that automatically recreates the savepoint after each transaction end.
-    This allows fixture code to use commit() while maintaining test isolation.
+    This fixture creates a SAVEPOINT that allows fixture code to use commit()
+    while maintaining test isolation. Without event listener to avoid asyncpg issues.
 
-    Pattern from intern-contest-cabinet project for compatibility with fixture commits.
-    Event listener is called synchronously, so it uses sync_connection.
+    For asyncpg compatibility, we don't use event listeners for automatic savepoint
+    recreation. Tests should work within a single savepoint context.
     """
-    savepoint: (
-        sa.ext.asyncio.AsyncTransaction | sa.engine.NestedTransaction
-    ) = await db_connection.begin_nested()
+    # Create initial savepoint
+    savepoint: sa.ext.asyncio.AsyncTransaction = await db_connection.begin_nested()
 
-    def on_release_savepoint(session, tx):
-        nonlocal savepoint
-        if not savepoint.is_active:
-            # Event listener is called synchronously, use sync_connection
-            savepoint = db_connection.sync_connection.begin_nested()
-
-    sa.event.listen(sa.orm.Session, "after_transaction_end", on_release_savepoint)
     yield
-    sa.event.remove(sa.orm.Session, "after_transaction_end", on_release_savepoint)
+
+    # Rollback savepoint if still active
+    if savepoint.is_active:
+        await savepoint.rollback()
 
 
 @pytest.fixture(scope="function")
@@ -244,7 +238,7 @@ def db_sessionmaker(db_savepoint: None) -> async_sessionmaker[AsyncSession]:
 
     Pattern from statements/ - use production Session
     """
-    return db.Session
+    return db.Session  # type: ignore[return-value]
 
 
 @pytest.fixture(scope="function")

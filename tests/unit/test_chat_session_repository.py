@@ -127,6 +127,9 @@ class TestChatSessionRepository:
         retrieved_topic1 = await chat_session_repo.get_by_chat_id(chat_id, 111)
         retrieved_topic2 = await chat_session_repo.get_by_chat_id(chat_id, 222)
 
+        assert retrieved_main is not None
+        assert retrieved_topic1 is not None
+        assert retrieved_topic2 is not None
         assert retrieved_main["email"] == "main@example.com"
         assert retrieved_topic1["email"] == "topic1@example.com"
         assert retrieved_topic2["email"] == "topic2@example.com"
@@ -264,6 +267,7 @@ class TestChatSessionRepository:
 
         # Verify only one session exists
         session = await chat_session_repo.get_by_chat_id(chat_id, thread_id)
+        assert session is not None
         assert session["email"] == "new@example.com"
 
     async def test_upsert_respects_thread_id_isolation(
@@ -290,6 +294,8 @@ class TestChatSessionRepository:
 
         # Verify both sessions exist with different data
         main_session = await chat_session_repo.get_by_chat_id(chat_id, 0)
+        assert main_session is not None
+        assert topic_session is not None
         assert main_session["email"] == "main@example.com"
         assert topic_session["email"] == "topic@example.com"
 

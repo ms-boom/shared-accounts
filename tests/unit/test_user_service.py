@@ -7,7 +7,6 @@ from aiogram.types import User
 
 from bot.db.database import Database
 from bot.services.user_service import UserService
-from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -15,20 +14,18 @@ class TestUserService:
     """Tests for UserService class."""
 
     @pytest.fixture
-    async def user_service_with_real_db(
-        self, test_database_adapter: DatabasesAdapter
-    ) -> UserService:
+    async def user_service_with_real_db(self, db_sessionmaker) -> UserService:
         """
         Create UserService with real database for integration-like tests.
 
         Args:
-            test_database_adapter: Test database adapter using db_session
+            db_sessionmaker: Session factory fixture
 
         Returns:
             UserService instance
         """
         mock_db = MagicMock(spec=Database)
-        mock_db.get_connection.return_value = test_database_adapter
+        mock_db.session_maker = db_sessionmaker
 
         return UserService(mock_db)
 

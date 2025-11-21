@@ -1,9 +1,9 @@
 """Unit tests for TaskRepository optimistic locking functionality."""
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.repositories.task_repository import TaskRepository
-from tests.adapters import DatabasesAdapter
 
 
 @pytest.mark.unit
@@ -11,9 +11,9 @@ class TestTaskRepositoryOptimisticLocking:
     """Tests for TaskRepository optimistic locking with version field."""
 
     @pytest.fixture
-    def task_repo(self, test_database_adapter: DatabasesAdapter):
+    async def task_repo(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
 
     async def test_update_status_requires_version_parameter(
         self, task_repo: TaskRepository
@@ -56,9 +56,9 @@ class TestTaskRepositoryOptimisticLockingIntegration:
     """
 
     @pytest.fixture
-    def task_repo(self, test_database_adapter: DatabasesAdapter):
+    async def task_repo(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
 
     async def test_create_task_includes_version(
         self, task_repo: TaskRepository
@@ -126,6 +126,7 @@ class TestTaskRepositoryOptimisticLockingIntegration:
 
         # Task status should remain unchanged
         task_after = await task_repo.get_by_id(task["id"])
+        assert task_after is not None
         assert task_after["status"] == "pending"
         assert task_after["version"] == 1
 
@@ -149,7 +150,7 @@ class TestTaskRepositoryOptimisticLockingIntegration:
     async def test_recover_stuck_tasks_resets_to_pending(
         self,
         task_repo: TaskRepository,
-        test_database_adapter: DatabasesAdapter,
+        db_session: AsyncSession,
     ) -> None:
         """Test that recover_stuck_tasks resets stuck tasks to pending."""
         # Create task and manually mark as processing
@@ -167,18 +168,20 @@ class TestTaskRepositoryOptimisticLockingIntegration:
         old_time = datetime.datetime.utcnow() - datetime.timedelta(minutes=10)
 
         # Simulate stuck task by updating directly in DB
-        from databases import Database
+        from sqlalchemy import text
 
-        db: Database = test_database_adapter
-        await db.execute(
-            """
+        await db_session.execute(
+            text(
+                """
             UPDATE tasks
             SET status = 'processing',
                 updated_at = :updated_at
             WHERE id = :task_id
-            """,
+            """
+            ),
             {"task_id": str(task["id"]), "updated_at": old_time},
         )
+        await db_session.commit()
 
         # Recover stuck tasks (timeout = 5 minutes)
         recovered_count = await task_repo.recover_stuck_tasks(stuck_timeout_minutes=5)
@@ -187,6 +190,7 @@ class TestTaskRepositoryOptimisticLockingIntegration:
 
         # Check task is back to pending
         recovered_task = await task_repo.get_by_id(task["id"])
+        assert recovered_task is not None
         assert recovered_task["status"] == "pending"
         assert recovered_task["version"] > task["version"]
 
@@ -225,6 +229,7 @@ class TestTaskRepositoryOptimisticLockingIntegration:
 
         # Verify final state matches first update
         final_task = await task_repo.get_by_id(task["id"])
+        assert final_task is not None
         assert final_task["status"] == "done"
         assert final_task["result"] == "First"
         assert final_task["version"] == version + 1

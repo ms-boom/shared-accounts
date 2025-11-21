@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
-from aiogram.types import ChatMember, User
+from aiogram.types import ChatMember
 
 from bot.core.config import Settings
 from bot.services.permission_service import PermissionService
@@ -35,10 +35,9 @@ class TestPermissionService:
         Returns:
             ChatMember with administrator status
         """
-        return ChatMember(
-            user=User(id=123, is_bot=False, first_name="Admin"),
-            status="administrator",
-        )
+        member = MagicMock(spec=ChatMember)
+        member.status = "administrator"
+        return member
 
     @pytest.fixture
     def mock_creator_member(self) -> ChatMember:
@@ -48,10 +47,9 @@ class TestPermissionService:
         Returns:
             ChatMember with creator status
         """
-        return ChatMember(
-            user=User(id=456, is_bot=False, first_name="Creator"),
-            status="creator",
-        )
+        member = MagicMock(spec=ChatMember)
+        member.status = "creator"
+        return member
 
     @pytest.fixture
     def mock_regular_member(self) -> ChatMember:
@@ -61,10 +59,9 @@ class TestPermissionService:
         Returns:
             ChatMember with member status
         """
-        return ChatMember(
-            user=User(id=789, is_bot=False, first_name="User"),
-            status="member",
-        )
+        member = MagicMock(spec=ChatMember)
+        member.status = "member"
+        return member
 
     async def test_checks_admin_permission_via_api(
         self,

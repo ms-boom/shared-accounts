@@ -95,10 +95,10 @@ class TestSettings:
 
         settings = Settings(
             TELEGRAM_TOKEN="123456:test",
-            DATA_DIR="/tmp/data",
-            SESSION_DIR="/tmp/sessions",
-            LOG_DIR="/tmp/logs",
-            ERROR_DIR="/tmp/errors",
+            DATA_DIR=Path("/tmp/data"),
+            SESSION_DIR=Path("/tmp/sessions"),
+            LOG_DIR=Path("/tmp/logs"),
+            ERROR_DIR=Path("/tmp/errors"),
         )
 
         assert isinstance(settings.DATA_DIR, Path)
@@ -119,11 +119,8 @@ class TestSettings:
 
         settings = Settings(TELEGRAM_TOKEN="123456:test")
 
-        # Check DATABASE_URL default value
-        assert (
-            settings.DATABASE_URL
-            == "postgresql+asyncpg://user:password@localhost/claude_bot"
-        )
+        # Check DATABASE_URL default value (SQLite)
+        assert settings.DATABASE_URL == "sqlite+aiosqlite:////data/claude_bot.db"
         assert settings.LOG_LEVEL == "INFO"
         assert settings.DEBUG is False
         assert settings.PERMISSION_CACHE_TTL == 300
