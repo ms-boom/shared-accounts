@@ -21,10 +21,10 @@ class Settings(BaseSettings):
         description="Bot token from @BotFather",
     )
 
-    # Database Configuration (PostgreSQL only)
+    # Database Configuration (PostgreSQL or SQLite)
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://user:password@localhost/claude_bot",
-        description="PostgreSQL database connection URL",
+        default="sqlite+aiosqlite:////data/claude_bot.db",
+        description="Database connection URL (PostgreSQL or SQLite)",
     )
 
     # Logging Configuration

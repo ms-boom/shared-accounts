@@ -165,8 +165,9 @@ class TaskRepository:
     async def dequeue_pending_task(self) -> dict | None:
         """Dequeue next pending task and mark it as processing.
 
-        Uses SELECT FOR UPDATE SKIP LOCKED with optimistic locking.
-        Transaction is committed immediately after status update to minimize lock time.
+        Uses SELECT FOR UPDATE with optimistic locking.
+        PostgreSQL uses SKIP LOCKED for better concurrency.
+        SQLite uses regular FOR UPDATE (less concurrent but simpler).
 
         Returns:
             Task data as dict or None if no pending tasks
@@ -179,14 +180,24 @@ class TaskRepository:
             Uses pessimistic locking to prevent race conditions.
         """
         try:
+            # Detect database type from session bind
+            dialect_name = self.session.bind.dialect.name if self.session.bind else "sqlite"
+
             # Select and lock the next pending task
             stmt = (
                 sa.select(Task)
                 .where(Task.status == "pending")
                 .order_by(Task.created_at.asc())
                 .limit(1)
-                .with_for_update(skip_locked=True)
             )
+
+            # PostgreSQL supports SKIP LOCKED for better concurrency
+            if dialect_name == "postgresql":
+                stmt = stmt.with_for_update(skip_locked=True)
+            else:
+                # SQLite doesn't support SKIP LOCKED, use regular FOR UPDATE
+                stmt = stmt.with_for_update()
+
             result = await self.session.execute(stmt)
             task = result.scalar_one_or_none()
 
@@ -202,6 +213,11 @@ class TaskRepository:
             logger.info(f"Dequeued task {task.id} for processing")
             return _row_to_dict(task)
         except Exception as e:
+            # SQLite may raise OperationalError if row is locked
+            # In this case, just return None (task was taken by another worker)
+            if "locked" in str(e).lower():
+                logger.debug("Task is locked by another worker, skipping")
+                return None
             logger.error(f"Failed to dequeue pending task: {e}")
             raise DatabaseError(f"Failed to dequeue pending task: {e}") from e
 

@@ -35,12 +35,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 import bot.db.database as db  # Import production database module
-import bot.db.dialect  # Import triggers dialect registration via sa.dialects.registry
 from bot.core.config import Settings
-
-# Ensure custom dialect module is loaded (triggers sa.dialects.registry call)
-# This import has a side effect of registering CustomAsyncpgDialect
-assert bot.db.dialect.CustomAsyncpgDialect is not None
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +46,10 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(scope="session")
 def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
-    """Test configuration with PostgreSQL test database.
+    """Test configuration with SQLite test database.
 
     This fixture provides configuration for the test database.
-    Uses default postgres database to avoid conflicts.
+    Uses SQLite in-memory or temp file for isolated testing.
 
     DATABASE_URL can be overridden via environment variable for CI/CD.
     """
@@ -63,10 +58,10 @@ def test_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
     # Create temp directories for test data
     temp_dir = tmp_path_factory.mktemp("test_data")
 
-    # Use environment variable if set (for CI/CD), otherwise use default
+    # Use environment variable if set (for CI/CD), otherwise use SQLite
     database_url = os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/claude_bot_test",
+        f"sqlite+aiosqlite:///{temp_dir}/test.db",
     )
 
     settings = Settings(
@@ -121,35 +116,57 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
     """AsyncEngine for test database.
 
     Session-scoped engine shared across all tests.
-    Creates engine directly without using production setup to avoid
-    potential event loop issues with CConnection initialization.
+    Supports both PostgreSQL and SQLite based on DATABASE_URL.
 
     Note: Database migrations must be applied before running tests.
     Locally run: alembic upgrade head
 
     Pattern from statements/tests/fixtures/db.py
     """
-    # Import custom dialect to ensure it's registered
+    # Detect database type from URL
+    db_url = test_settings.DATABASE_URL.lower()
+    is_sqlite = db_url.startswith("sqlite")
+    is_postgres = "postgres" in db_url
 
-    from bot.db.dialect import CConnection
+    # Configure connect_args based on database type
+    connect_args: dict = {}
 
-    connect_args = {
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-        "connection_class": CConnection,
-    }
+    if is_postgres:
+        # PostgreSQL-specific configuration
+        from bot.db.dialect import CConnection
 
-    # Create engine directly
+        connect_args = {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+            "connection_class": CConnection,
+        }
+    elif is_sqlite:
+        # SQLite-specific configuration
+        connect_args = {
+            "check_same_thread": False,  # Allow usage across threads
+        }
+
+    # Create engine with appropriate pool settings
+    pool_size = 1 if is_sqlite else 5
+    max_overflow = 0 if is_sqlite else 10
+
     engine = create_async_engine(
         test_settings.DATABASE_URL,
         echo=False,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         pool_timeout=30,
         pool_recycle=3600,
         pool_pre_ping=False,
         connect_args=connect_args,
     )
+
+    # Create tables for SQLite (in-memory DB needs schema)
+    if is_sqlite:
+        from bot.db.models import Base
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     yield engine
 
