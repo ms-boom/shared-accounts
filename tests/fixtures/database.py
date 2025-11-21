@@ -227,9 +227,7 @@ async def db_savepoint(
         nonlocal savepoint
         if not savepoint.is_active:
             # Event listener is called synchronously, use sync_connection
-            if db_connection.sync_connection is None:
-                raise RuntimeError("sync_connection is None")
-            savepoint = db_connection.sync_connection.begin_nested()
+            savepoint = db_connection.sync_connection.begin_nested()  # type: ignore[union-attr]
 
     sa.event.listen(sa.orm.Session, "after_transaction_end", on_release_savepoint)
     yield
