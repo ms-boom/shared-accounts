@@ -196,7 +196,7 @@ class ChatSessionRepository:
         """
         try:
             # PostgreSQL INSERT ... ON CONFLICT
-            insert_stmt = sa.dialects.postgresql.insert(ChatSession).values(
+            insert_stmt = sa.dialects.postgresql.insert(ChatSession).values(  # type: ignore[attr-defined]
                 chat_id=chat_id,
                 thread_id=thread_id,
                 email=email,

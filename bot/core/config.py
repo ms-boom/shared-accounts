@@ -1,7 +1,6 @@
 """Application configuration using Pydantic Settings."""
 
 from pathlib import Path
-from typing import cast
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -132,5 +131,4 @@ def get_settings() -> Settings:
     understand the signature. We use model_validate to make it explicit.
     """
     # Using empty dict tells pydantic to read from environment
-    # Pydantic stubs don't type model_validate correctly, use cast
-    return cast(Settings, Settings.model_validate({}))
+    return Settings.model_validate({})
