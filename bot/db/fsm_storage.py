@@ -1,7 +1,7 @@
 """PostgreSQL-based FSM storage for aiogram."""
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
 from aiogram.fsm.state import State
 from aiogram.fsm.storage.base import BaseStorage, StateType, StorageKey
@@ -80,9 +80,7 @@ class PostgreSQLStorage(BaseStorage):
                 FSMState.thread_id == (key.thread_id or 0),
             )
             result = await session.execute(stmt)
-            row = result.scalar_one_or_none()
-            # SQLAlchemy returns Any from scalar_one_or_none, but we know it's str | None
-            return cast(str | None, row)
+            return result.scalar_one_or_none()
 
     async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
         """
