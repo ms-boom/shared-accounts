@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -26,7 +24,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: alembic upgrade head
+    command: uv run alembic upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/claude_bot
     depends_on:
