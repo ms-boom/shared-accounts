@@ -44,4 +44,5 @@ RUN uv run playwright install-deps
 RUN mkdir -p /data/sessions /data/logs /data/errors && \
     chmod 700 /data/sessions
 
-CMD ["uv", "run", "python", "-m", "bot"]
+COPY entrypoint.sh ./
+CMD ["./entrypoint.sh"]
