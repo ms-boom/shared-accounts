@@ -5,7 +5,6 @@ import logging
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
@@ -96,7 +95,7 @@ async def init_session_handler(
     thread_id = get_thread_id(message)
 
     # Read: check existing session (read-only, direct session is fine)
-    async with database.session_maker() as session:
+    async with database.read() as session:
         session_repo = ChatSessionRepository(session)
         existing_session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
@@ -112,7 +111,7 @@ async def init_session_handler(
         await message.reply("❌ Unable to identify user.")
         return
 
-    # Write: create task through writer_queue
+    # Write: create task
     chat_id = message.chat.id
     user_id = message.from_user.id
     payload = {"email": email}
@@ -127,7 +126,7 @@ async def init_session_handler(
             thread_id=thread_id,
         )
 
-    task = await database.writer_queue.execute(_create_task)
+    task = await database.write(_create_task)
 
     await message.reply(
         f"🔄 Initializing session for {email}.\n"
@@ -158,7 +157,7 @@ async def get_code_handler(
     thread_id = get_thread_id(message)
 
     # Read: check existing session (read-only, direct session is fine)
-    async with database.session_maker() as db_session:
+    async with database.read() as db_session:
         session_repo = ChatSessionRepository(db_session)
         session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
@@ -196,7 +195,7 @@ async def get_code_handler(
         await message.reply("❌ Unable to identify user.")
         return
 
-    # Write: create task through writer_queue
+    # Write: create task
     chat_id = message.chat.id
     user_id = message.from_user.id
     payload = {"auth_url": auth_url}
@@ -211,13 +210,11 @@ async def get_code_handler(
             thread_id=thread_id,
         )
 
-    task = await database.writer_queue.execute(_create_task)
+    task = await database.write(_create_task)
 
     await message.reply("🔄 Extracting authorization code...")
 
-    logger.info(
-        f"Created get_code task {task['id']} for chat {chat_id}/{thread_id}"
-    )
+    logger.info(f"Created get_code task {task['id']} for chat {chat_id}/{thread_id}")
 
 
 @router.message(Command("health"))
@@ -237,7 +234,7 @@ async def health_handler(
     """
     try:
         # Check database connection and get stats using SQLAlchemy session
-        async with database.session_maker() as db_session, db_session.begin():
+        async with database.read() as db_session, db_session.begin():
             # Check database connection
             import sqlalchemy as sa
 
@@ -310,7 +307,7 @@ async def handle_claude_url(
     thread_id = get_thread_id(message)
 
     # Read: check for pending init_session (read-only, direct session is fine)
-    async with database.session_maker() as db_session:
+    async with database.read() as db_session:
         task_repo = TaskRepository(db_session)
         recent_tasks = await task_repo.get_by_chat_id(
             message.chat.id, limit=5, thread_id=thread_id
@@ -337,7 +334,7 @@ async def handle_claude_url(
         await message.reply("❌ Unable to identify user.")
         return
 
-    # Write: create task through writer_queue
+    # Write: create task
     chat_id = message.chat.id
     user_id = message.from_user.id
     payload = {"login_url": login_url}
@@ -352,7 +349,7 @@ async def handle_claude_url(
             thread_id=thread_id,
         )
 
-    task = await database.writer_queue.execute(_create_task)
+    task = await database.write(_create_task)
 
     await message.reply("🔄 Processing login link...")
 

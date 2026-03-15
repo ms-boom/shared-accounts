@@ -59,7 +59,9 @@ class GroupTrackerMiddleware(BaseMiddleware):
         if isinstance(event, Message):
             now = time.monotonic()
 
-            if event.from_user and not self._is_cached(self._seen_users, event.from_user.id, now):
+            if event.from_user and not self._is_cached(
+                self._seen_users, event.from_user.id, now
+            ):
                 try:
                     await self.user_service.register_user(
                         user_id=event.from_user.id,

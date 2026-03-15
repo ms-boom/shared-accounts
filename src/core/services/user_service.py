@@ -70,7 +70,7 @@ class UserService:
                     language_code=language_code,
                 )
 
-        return await self.db.writer_queue.execute(_do_register)
+        return await self.db.write(_do_register)
 
     async def get_user(self, user_id: int) -> dict | None:
         """
@@ -82,6 +82,6 @@ class UserService:
         Returns:
             User data as dict or None if not found
         """
-        async with self.db.session_maker() as session:
+        async with self.db.read() as session:
             repository = UserRepository(session)
             return await repository.get_by_id(user_id)

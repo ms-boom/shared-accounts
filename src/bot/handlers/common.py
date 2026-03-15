@@ -52,7 +52,9 @@ async def help_handler(message: Message) -> None:
 
     if is_group:
         help_text += "\n<b>Авторизация Claude Code:</b>\n"
-        help_text += "🔹 /init_session &lt;email&gt; - Инициализировать сессию (только админы)\n"
+        help_text += (
+            "🔹 /init_session &lt;email&gt; - Инициализировать сессию (только админы)\n"
+        )
         help_text += "🔹 /get_code &lt;url&gt; - Получить код авторизации\n"
 
     await message.reply(help_text, parse_mode="HTML")

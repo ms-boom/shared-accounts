@@ -1,10 +1,10 @@
-"""Tests verifying TaskWorker routes all writes through writer_queue.
+"""Tests verifying TaskWorker routes all writes through db.write().
 
-These tests ensure that TaskWorker uses database.writer_queue.execute()
+These tests ensure that TaskWorker uses database.write()
 for all write operations instead of direct session.begin().
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -17,27 +17,18 @@ from core.ports import LoggingNotifier
 from core.worker.task_worker import TaskWorker
 
 
-def _make_writer_queue_mock(
-    session_maker: async_sessionmaker[AsyncSession],
-) -> MagicMock:
-    """Create a writer_queue mock that executes fn through the test session."""
-
-    async def _execute(fn):  # noqa: ANN001
-        async with session_maker() as session, session.begin():
-            return await fn(session)
-
-    mock = MagicMock()
-    mock.execute = AsyncMock(side_effect=_execute)
-    return mock
-
-
 def _make_mock_database(
     session_maker: async_sessionmaker[AsyncSession],
 ) -> MagicMock:
-    """Create a mock Database with real session_maker and writer_queue mock."""
+    """Create a mock Database with real session_maker and db.write mock."""
+
+    async def _write(fn):  # noqa: ANN001
+        async with session_maker() as session, session.begin():
+            return await fn(session)
+
     mock_db = MagicMock(spec=Database)
     mock_db.session_maker = session_maker
-    mock_db.writer_queue = _make_writer_queue_mock(session_maker)
+    mock_db.write = AsyncMock(side_effect=_write)
     return mock_db
 
 
@@ -55,20 +46,20 @@ def _make_test_settings() -> MagicMock:
 
 @pytest.mark.unit
 class TestTaskWorkerDequeueWriterQueue:
-    """Verify dequeue_pending_task goes through writer_queue."""
+    """Verify dequeue_pending_task goes through db.write()."""
 
-    async def test_dequeue_uses_writer_queue(
+    async def test_dequeue_uses_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """TaskWorker.run() must dequeue tasks through writer_queue."""
+        """TaskWorker.run() must dequeue tasks through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         settings = _make_test_settings()
         notifier = MagicMock(spec=LoggingNotifier)
         notifier.notify_success = AsyncMock()
         notifier.notify_error = AsyncMock()
 
-        worker = TaskWorker(mock_db, settings, notifier)
+        TaskWorker(mock_db, settings, notifier)
 
         # Create a pending task
         async with db_sessionmaker() as session, session.begin():
@@ -80,15 +71,13 @@ class TestTaskWorkerDequeueWriterQueue:
                 payload={"email": "test@example.com"},
             )
 
-        # Dequeue should go through writer_queue
+        # Dequeue should go through db.write()
         # We test this by calling the internal dequeue pattern that run() uses
-        result = await mock_db.writer_queue.execute(
-            _make_dequeue_fn()
-        )
+        result = await mock_db.write(_make_dequeue_fn())
 
         assert result is not None
         assert result["task_type"] == "init_session"
-        mock_db.writer_queue.execute.assert_called()
+        mock_db.write.assert_called()
 
 
 def _make_dequeue_fn():
@@ -103,13 +92,13 @@ def _make_dequeue_fn():
 
 @pytest.mark.unit
 class TestTaskWorkerProcessTaskWriterQueue:
-    """Verify process_task routes error handling writes through writer_queue."""
+    """Verify process_task routes error handling writes through db.write()."""
 
-    async def test_process_init_session_uses_writer_queue(
+    async def test_process_init_session_uses_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """process_init_session must route upsert + update_status through writer_queue."""
+        """process_init_session must route upsert + update_status through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         settings = _make_test_settings()
         notifier = MagicMock(spec=LoggingNotifier)
@@ -139,13 +128,13 @@ class TestTaskWorkerProcessTaskWriterQueue:
             version=task["version"],
         )
 
-        mock_db.writer_queue.execute.assert_called_once()
+        mock_db.write.assert_called_once()
 
-    async def test_process_login_link_uses_writer_queue(
+    async def test_process_login_link_uses_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """process_login_link must route update_status through writer_queue."""
+        """process_login_link must route update_status through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         settings = _make_test_settings()
         notifier = MagicMock(spec=LoggingNotifier)
@@ -153,9 +142,7 @@ class TestTaskWorkerProcessTaskWriterQueue:
 
         worker = TaskWorker(mock_db, settings, notifier)
         worker.playwright = MagicMock()
-        worker.playwright.process_login_link = AsyncMock(
-            return_value="Login processed"
-        )
+        worker.playwright.process_login_link = AsyncMock(return_value="Login processed")
 
         # Create a pending task
         async with db_sessionmaker() as session, session.begin():
@@ -175,13 +162,13 @@ class TestTaskWorkerProcessTaskWriterQueue:
             version=task["version"],
         )
 
-        mock_db.writer_queue.execute.assert_called_once()
+        mock_db.write.assert_called_once()
 
-    async def test_process_get_code_uses_writer_queue(
+    async def test_process_get_code_uses_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """process_get_code must route update_last_used + update_status through writer_queue."""
+        """process_get_code must route update_last_used + update_status through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         settings = _make_test_settings()
         notifier = MagicMock(spec=LoggingNotifier)
@@ -217,13 +204,13 @@ class TestTaskWorkerProcessTaskWriterQueue:
             version=task["version"],
         )
 
-        mock_db.writer_queue.execute.assert_called_once()
+        mock_db.write.assert_called_once()
 
-    async def test_process_task_error_uses_writer_queue(
+    async def test_process_task_error_uses_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """process_task must route error status update through writer_queue."""
+        """process_task must route error status update through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         settings = _make_test_settings()
         notifier = MagicMock(spec=LoggingNotifier)
@@ -247,28 +234,26 @@ class TestTaskWorkerProcessTaskWriterQueue:
 
         await worker.process_task(task)
 
-        # writer_queue should be called for the error status update
-        mock_db.writer_queue.execute.assert_called()
+        # db.write() should be called for the error status update
+        mock_db.write.assert_called()
 
 
 @pytest.mark.unit
 class TestTaskWorkerRecoveryWriterQueue:
-    """Verify _recovery_loop routes writes through writer_queue."""
+    """Verify _recovery_loop routes writes through db.write()."""
 
-    async def test_recovery_uses_writer_queue(
+    async def test_recovery_uses_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """recover_stuck_tasks must go through writer_queue."""
+        """recover_stuck_tasks must go through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         settings = _make_test_settings()
         notifier = MagicMock(spec=LoggingNotifier)
 
-        worker = TaskWorker(mock_db, settings, notifier)
+        TaskWorker(mock_db, settings, notifier)
 
         # Create a stuck task (processing status)
-        from datetime import datetime, timedelta
-
         async with db_sessionmaker() as session, session.begin():
             repo = TaskRepository(session)
             task = await repo.create(
@@ -280,12 +265,12 @@ class TestTaskWorkerRecoveryWriterQueue:
             # Manually set to processing with old timestamp
             await repo.update_status(task["id"], "processing", task["version"])
 
-        # Call recovery through writer_queue (the pattern worker should use)
+        # Call recovery through db.write() (the pattern worker should use)
         async def _do_recovery(session: AsyncSession) -> int:
             repo = TaskRepository(session)
             return await repo.recover_stuck_tasks(stuck_timeout_minutes=0)
 
-        recovered = await mock_db.writer_queue.execute(_do_recovery)
+        recovered = await mock_db.write(_do_recovery)
 
         assert recovered >= 1
-        mock_db.writer_queue.execute.assert_called()
+        mock_db.write.assert_called()

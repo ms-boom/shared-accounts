@@ -7,9 +7,9 @@ from aiogram.fsm.state import State
 from aiogram.fsm.storage.base import BaseStorage, StateType, StorageKey
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.db.database import SQLiteWriterQueue
+from core.db.database import Database
 from core.db.models import FSMState
 
 _CONFLICT_COLUMNS = ["chat_id", "user_id", "thread_id"]
@@ -18,28 +18,21 @@ _CONFLICT_COLUMNS = ["chat_id", "user_id", "thread_id"]
 class BotFSMStorage(BaseStorage):
     """SQLite FSM storage for aiogram.
 
-    Routes write operations through SQLiteWriterQueue to prevent concurrent
-    write conflicts.
+    Routes write operations through Database.write() to prevent concurrent
+    SQLite write conflicts, and reads directly via Database.read().
 
     Attributes:
-        session_maker: SQLAlchemy async session factory
-        writer_queue: Queue for serializing SQLite writes
+        db: Database instance providing read/write access
     """
 
-    def __init__(
-        self,
-        session_maker: async_sessionmaker[AsyncSession],
-        writer_queue: SQLiteWriterQueue,
-    ) -> None:
+    def __init__(self, db: Database) -> None:
         """
         Initialize FSM storage.
 
         Args:
-            session_maker: SQLAlchemy async session factory
-            writer_queue: Writer queue for SQLite write serialization.
+            db: Database instance (must be started via startup() before use).
         """
-        self.session_maker = session_maker
-        self.writer_queue = writer_queue
+        self.db = db
 
     # --- Private write helpers (called with an already-open session) ---
 
@@ -93,7 +86,7 @@ class BotFSMStorage(BaseStorage):
         """
         state_name = state.state if isinstance(state, State) else state
 
-        await self.writer_queue.execute(lambda s: self._write_state(s, key, state_name))
+        await self.db.write(lambda s: self._write_state(s, key, state_name))
 
     async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
         """
@@ -105,7 +98,7 @@ class BotFSMStorage(BaseStorage):
         """
         data_dict = dict(data)
 
-        await self.writer_queue.execute(lambda s: self._write_data(s, key, data_dict))
+        await self.db.write(lambda s: self._write_data(s, key, data_dict))
 
     async def update_data(
         self, key: StorageKey, data: Mapping[str, Any]
@@ -120,7 +113,7 @@ class BotFSMStorage(BaseStorage):
         Returns:
             Updated data
         """
-        async with self.session_maker() as session:
+        async with self.db.read() as session:
             select_stmt = select(FSMState.data).where(
                 FSMState.chat_id == key.chat_id,
                 FSMState.user_id == key.user_id,
@@ -131,7 +124,7 @@ class BotFSMStorage(BaseStorage):
 
         merged_data = {**existing_data, **data}
 
-        await self.writer_queue.execute(lambda s: self._write_data(s, key, merged_data))
+        await self.db.write(lambda s: self._write_data(s, key, merged_data))
 
         return merged_data
 
@@ -147,15 +140,15 @@ class BotFSMStorage(BaseStorage):
         Returns:
             Current state or None if no state set
         """
-        async with self.session_maker() as session:
+        async with self.db.read() as session:
             stmt = select(FSMState.state).where(
                 FSMState.chat_id == key.chat_id,
                 FSMState.user_id == key.user_id,
                 FSMState.thread_id == (key.thread_id or 0),
             )
             result = await session.execute(stmt)
-            row = result.scalar_one_or_none()
-            return row  # scalar_one_or_none() already returns str | None here
+            state: str | None = result.scalar_one_or_none()
+            return state
 
     async def get_data(self, key: StorageKey) -> dict[str, Any]:
         """
@@ -167,7 +160,7 @@ class BotFSMStorage(BaseStorage):
         Returns:
             Stored data or empty dict if no data
         """
-        async with self.session_maker() as session:
+        async with self.db.read() as session:
             stmt = select(FSMState.data).where(
                 FSMState.chat_id == key.chat_id,
                 FSMState.user_id == key.user_id,

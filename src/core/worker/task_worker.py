@@ -80,12 +80,12 @@ class TaskWorker:
         try:
             while self.running:
                 try:
-                    # Dequeue next pending task through writer_queue
+                    # Dequeue next pending task
                     async def _dequeue(session: AsyncSession) -> dict | None:
                         task_repo = TaskRepository(session)
                         return await task_repo.dequeue_pending_task()
 
-                    task = await self.db.writer_queue.execute(_dequeue)
+                    task = await self.db.write(_dequeue)
 
                     if task:
                         await self.process_task(task)
@@ -163,7 +163,7 @@ class TaskWorker:
     async def _mark_task_failed(
         self, task_id: str, version: int, error_message: str
     ) -> dict | None:
-        """Mark task as failed through writer_queue.
+        """Mark task as failed.
 
         Args:
             task_id: Task ID string
@@ -180,7 +180,7 @@ class TaskWorker:
                 task_id, "failed", version, error_message
             )
 
-        return await self.db.writer_queue.execute(_do_update)
+        return await self.db.write(_do_update)
 
     async def process_init_session(
         self,
@@ -209,7 +209,7 @@ class TaskWorker:
             chat_id, email, thread_id
         )
 
-        # Create session record and mark task as done through writer_queue
+        # Create session record and mark task as done
         async def _do_complete(session: AsyncSession) -> dict | None:
             session_repo = ChatSessionRepository(session)
             await session_repo.upsert(
@@ -221,7 +221,7 @@ class TaskWorker:
             task_repo = TaskRepository(session)
             return await task_repo.update_status(task_id, "done", version, message)
 
-        result = await self.db.writer_queue.execute(_do_complete)
+        result = await self.db.write(_do_complete)
 
         if not result:
             logger.warning(f"Task {task_id} update failed: version conflict")
@@ -257,12 +257,12 @@ class TaskWorker:
             chat_id, login_url, thread_id
         )
 
-        # Mark task as done through writer_queue
+        # Mark task as done
         async def _do_complete(session: AsyncSession) -> dict | None:
             task_repo = TaskRepository(session)
             return await task_repo.update_status(task_id, "done", version, message)
 
-        result = await self.db.writer_queue.execute(_do_complete)
+        result = await self.db.write(_do_complete)
 
         if not result:
             logger.warning(f"Task {task_id} update failed: version conflict")
@@ -298,14 +298,14 @@ class TaskWorker:
             chat_id, auth_url, thread_id
         )
 
-        # Update last_used and mark task as done through writer_queue
+        # Update last_used and mark task as done
         async def _do_complete(session: AsyncSession) -> dict | None:
             session_repo = ChatSessionRepository(session)
             await session_repo.update_last_used(chat_id, thread_id)
             task_repo = TaskRepository(session)
             return await task_repo.update_status(task_id, "done", version, code)
 
-        result = await self.db.writer_queue.execute(_do_complete)
+        result = await self.db.write(_do_complete)
 
         if not result:
             logger.warning(f"Task {task_id} update failed: version conflict")
@@ -336,14 +336,16 @@ class TaskWorker:
                 if not self.running:
                     break
 
-                # Recover stuck tasks through writer_queue
+                # Recover stuck tasks
                 stuck_timeout = self.settings.TASK_STUCK_TIMEOUT
 
-                async def _do_recovery(session: AsyncSession) -> int:
+                async def _do_recovery(
+                    session: AsyncSession, _timeout: int = stuck_timeout
+                ) -> int:
                     task_repo = TaskRepository(session)
-                    return await task_repo.recover_stuck_tasks(stuck_timeout)
+                    return await task_repo.recover_stuck_tasks(_timeout)
 
-                recovered = await self.db.writer_queue.execute(_do_recovery)
+                recovered = await self.db.write(_do_recovery)
 
                 if recovered > 0:
                     logger.info(f"Recovery check: recovered {recovered} stuck tasks")

@@ -1,10 +1,10 @@
-"""Tests verifying handlers route writes through writer_queue.
+"""Tests verifying handlers route writes through db.write().
 
-These tests ensure that claude_auth handlers use database.writer_queue.execute()
+These tests ensure that claude_auth handlers use database.write()
 for all write operations instead of direct session.begin().
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiogram.types import Chat, Message, User
@@ -19,25 +19,19 @@ from core.config import Settings
 from core.db.database import Database
 
 
-def _make_writer_queue_mock(session_maker: async_sessionmaker[AsyncSession]) -> MagicMock:
-    """Create a writer_queue mock that executes fn through the test session."""
-
-    async def _execute(fn):  # noqa: ANN001
-        async with session_maker() as session, session.begin():
-            return await fn(session)
-
-    mock = MagicMock()
-    mock.execute = AsyncMock(side_effect=_execute)
-    return mock
-
-
 def _make_mock_database(
     session_maker: async_sessionmaker[AsyncSession],
 ) -> MagicMock:
-    """Create a mock Database with real session_maker and writer_queue mock."""
+    """Create a mock Database with real session_maker and db.write/read mocks."""
+
+    async def _write(fn):  # noqa: ANN001
+        async with session_maker() as session, session.begin():
+            return await fn(session)
+
     mock_db = MagicMock(spec=Database)
     mock_db.session_maker = session_maker
-    mock_db.writer_queue = _make_writer_queue_mock(session_maker)
+    mock_db.write = AsyncMock(side_effect=_write)
+    mock_db.read = session_maker
     return mock_db
 
 
@@ -66,13 +60,13 @@ def _make_message(
 
 @pytest.mark.unit
 class TestInitSessionHandlerWriterQueue:
-    """Verify init_session_handler routes task creation through writer_queue."""
+    """Verify init_session_handler routes task creation through db.write()."""
 
-    async def test_creates_task_through_writer_queue(
+    async def test_creates_task_through_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """init_session_handler must call writer_queue.execute() to create a task."""
+        """init_session_handler must call db.write() to create a task."""
         mock_db = _make_mock_database(db_sessionmaker)
         message = _make_message(text="/init_session test@example.com")
 
@@ -80,14 +74,14 @@ class TestInitSessionHandlerWriterQueue:
 
         await init_session_handler(message, mock_db, settings)
 
-        mock_db.writer_queue.execute.assert_called_once()
+        mock_db.write.assert_called_once()
         message.reply.assert_called()
 
-    async def test_task_created_in_db_through_writer_queue(
+    async def test_task_created_in_db_through_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """Task must actually be persisted when going through writer_queue."""
+        """Task must actually be persisted when going through db.write()."""
         mock_db = _make_mock_database(db_sessionmaker)
         message = _make_message(text="/init_session test@example.com")
 
@@ -108,13 +102,13 @@ class TestInitSessionHandlerWriterQueue:
 
 @pytest.mark.unit
 class TestGetCodeHandlerWriterQueue:
-    """Verify get_code_handler routes task creation through writer_queue."""
+    """Verify get_code_handler routes task creation through db.write()."""
 
-    async def test_creates_task_through_writer_queue(
+    async def test_creates_task_through_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """get_code_handler must call writer_queue.execute() to create a task."""
+        """get_code_handler must call db.write() to create a task."""
         mock_db = _make_mock_database(db_sessionmaker)
 
         # First, create a chat session so get_code_handler finds it
@@ -134,14 +128,14 @@ class TestGetCodeHandlerWriterQueue:
 
         await get_code_handler(message, mock_db)
 
-        mock_db.writer_queue.execute.assert_called_once()
+        mock_db.write.assert_called_once()
         message.reply.assert_called()
 
-    async def test_no_writer_queue_call_when_no_session(
+    async def test_no_write_call_when_no_session(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """get_code_handler should not call writer_queue if no session exists (read-only)."""
+        """get_code_handler should not call db.write() if no session exists (read-only)."""
         mock_db = _make_mock_database(db_sessionmaker)
 
         message = _make_message(
@@ -150,18 +144,18 @@ class TestGetCodeHandlerWriterQueue:
 
         await get_code_handler(message, mock_db)
 
-        mock_db.writer_queue.execute.assert_not_called()
+        mock_db.write.assert_not_called()
 
 
 @pytest.mark.unit
 class TestHandleClaudeUrlWriterQueue:
-    """Verify handle_claude_url routes task creation through writer_queue."""
+    """Verify handle_claude_url routes task creation through db.write()."""
 
-    async def test_creates_task_through_writer_queue(
+    async def test_creates_task_through_write(
         self,
         db_sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
-        """handle_claude_url must call writer_queue.execute() to create a task."""
+        """handle_claude_url must call db.write() to create a task."""
         mock_db = _make_mock_database(db_sessionmaker)
 
         # Create a pending init_session task so handle_claude_url processes the URL
@@ -183,5 +177,5 @@ class TestHandleClaudeUrlWriterQueue:
 
         await handle_claude_url(message, mock_db)
 
-        mock_db.writer_queue.execute.assert_called_once()
+        mock_db.write.assert_called_once()
         message.reply.assert_called()

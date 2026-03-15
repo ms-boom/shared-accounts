@@ -107,7 +107,7 @@ async def main() -> None:
     await on_startup(bot, database, settings.DEBUG)
 
     # Use BotFSMStorage for FSM (persistent state across bot restarts)
-    storage = BotFSMStorage(database.session_maker, writer_queue=database.writer_queue)
+    storage = BotFSMStorage(database)
     dp = Dispatcher(storage=storage)
 
     # Register middleware

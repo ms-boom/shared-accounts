@@ -2,8 +2,17 @@
 
 Pattern from statements/ project - global Session with proper configuration.
 
-Usage in production code:
-    async with db.Session() as session, session.begin():
+Usage — writes (serialized through SQLiteWriterQueue to avoid "database is locked"):
+    async def _do_insert(session: AsyncSession) -> MyModel:
+        obj = MyModel(...)
+        session.add(obj)
+        await session.flush()
+        return obj
+
+    result = await db.write(_do_insert)
+
+Usage — reads (WAL mode allows concurrent reads without the queue):
+    async with db.read() as session:
         result = await session.execute(sa.select(Model).where(...))
         records = result.scalars().all()
 
@@ -240,7 +249,7 @@ class Database:
         """
         self.settings = settings
         self._engine: AsyncEngine | None = None
-        self.writer_queue: SQLiteWriterQueue | None = None
+        self._writer_queue: SQLiteWriterQueue | None = None
 
     @property
     def session_maker(self) -> sa.orm.sessionmaker:
@@ -251,6 +260,42 @@ class Database:
         """
         return Session
 
+    async def write(self, fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
+        """Execute a write operation through the serialized queue.
+
+        All writes must go through this method so that SQLite's single-writer
+        constraint is respected — concurrent writes cause "database is locked"
+        even with busy_timeout.
+
+        Args:
+            fn: Async callable receiving AsyncSession.
+                Must NOT call commit() or close() — the queue handles both.
+
+        Returns:
+            The return value of fn.
+
+        Raises:
+            RuntimeError: If called before startup().
+        """
+        if self._writer_queue is None:
+            raise RuntimeError("Database not initialized. Call startup() first.")
+        return await self._writer_queue.execute(fn)
+
+    def read(self) -> AsyncSession:
+        """Return a read-only session context manager.
+
+        WAL journal mode allows concurrent readers to run alongside the single
+        writer, so reads do not need to go through the serialized queue.
+
+        Usage:
+            async with db.read() as session:
+                result = await session.execute(...)
+
+        Returns:
+            Async context manager that yields AsyncSession.
+        """
+        return self.session_maker()  # type: ignore[no-any-return]
+
     async def startup(self) -> None:
         """Initialize database engine and configure global Session.
 
@@ -258,17 +303,17 @@ class Database:
         operations within the same process.
         """
         self._engine = await setup(self.settings)
-        self.writer_queue = SQLiteWriterQueue(self.session_maker)  # type: ignore[arg-type]
-        await self.writer_queue.start()
+        self._writer_queue = SQLiteWriterQueue(self.session_maker)  # type: ignore[arg-type]
+        await self._writer_queue.start()
 
     async def shutdown(self) -> None:
         """Dispose database engine and cleanup resources.
 
         For SQLite, gracefully drains the writer queue before disposing the engine.
         """
-        if self.writer_queue is not None:
-            await self.writer_queue.stop()
-            self.writer_queue = None
+        if self._writer_queue is not None:
+            await self._writer_queue.stop()
+            self._writer_queue = None
         await dispose()
         self._engine = None
 
