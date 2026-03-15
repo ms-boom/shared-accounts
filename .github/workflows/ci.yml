@@ -11,21 +11,6 @@ jobs:
     name: Lint and Test
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: claude_bot_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -45,22 +30,22 @@ jobs:
 
       - name: Run database migrations
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/claude_bot_test
+          DATABASE_URL: "sqlite+aiosqlite:///test.db"
           TELEGRAM_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
         run: uv run alembic upgrade head
 
       - name: Run ruff linter
-        run: uv run ruff check bot tests
+        run: uv run ruff check src tests
 
       - name: Run ruff formatter check
-        run: uv run ruff format --check bot tests
+        run: uv run ruff format --check src tests
 
       - name: Run mypy type checker
-        run: uv run mypy bot
+        run: uv run mypy src/core src/bot
 
       - name: Run tests with coverage
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/claude_bot_test
+          DATABASE_URL: "sqlite+aiosqlite:///test.db"
           TELEGRAM_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
         run: uv run pytest --cov=bot --cov-report=xml --cov-report=term-missing
 
