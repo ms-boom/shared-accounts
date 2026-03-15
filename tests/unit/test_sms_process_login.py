@@ -75,11 +75,10 @@ async def test__process_login__success__returns_success_message(
 
     page = _make_page()
 
-    # Authenticated locator: supports .or_() chain and .first.wait_for()
-    auth_locator = MagicMock()
-    auth_locator.or_ = MagicMock(return_value=auth_locator)
-    auth_locator.first = AsyncMock()
-    auth_locator.first.wait_for = AsyncMock()
+    # Usage indicator locator returned by get_by_text("usage")
+    usage_locator = MagicMock()
+    usage_locator.first = AsyncMock()
+    usage_locator.first.wait_for = AsyncMock()
 
     def locator_side_effect(selector: str) -> MagicMock:
         if "Reject All Cookies" in selector:
@@ -89,13 +88,10 @@ async def test__process_login__success__returns_success_message(
                 side_effect=PlaywrightTimeoutError("no popup")
             )
             return cookie_mock
-        return auth_locator
+        return MagicMock()
 
     page.locator.side_effect = locator_side_effect
-
-    text_locator = MagicMock()
-    text_locator.or_ = MagicMock(return_value=auth_locator)
-    page.get_by_text.return_value = text_locator
+    page.get_by_text.return_value = usage_locator
 
     context = _make_context(page)
     playwright = _make_playwright(context)
@@ -109,6 +105,9 @@ async def test__process_login__success__returns_success_message(
     )
 
     assert "Session initialized successfully" in result
+    # Verify navigated to settings/usage
+    goto_calls = [str(c) for c in page.goto.call_args_list]
+    assert any("settings/usage" in c for c in goto_calls)
     context.close.assert_called_once()
 
 
