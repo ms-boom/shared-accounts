@@ -98,6 +98,7 @@ class SessionManagementService:
             await page.goto(
                 "https://claude.ai/login",
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                wait_until="domcontentloaded",
             )
             logger.info(f"Opened login page for session {session_path}")
             await self._save_debug(page, session_path, "01_login_page")
@@ -186,7 +187,9 @@ class SessionManagementService:
             page = context.pages[0] if context.pages else await context.new_page()
 
             await page.goto(
-                login_url, timeout=self.settings.PLAYWRIGHT_TIMEOUT
+                login_url,
+                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                wait_until="domcontentloaded",
             )
             await self._save_debug(page, session_path, "04_magic_link")
 
@@ -251,7 +254,9 @@ class SessionManagementService:
             page = context.pages[0] if context.pages else await context.new_page()
 
             await page.goto(
-                auth_url, timeout=self.settings.PLAYWRIGHT_TIMEOUT
+                auth_url,
+                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                wait_until="domcontentloaded",
             )
             await self._save_debug(page, session_path, "06_auth_page")
 
