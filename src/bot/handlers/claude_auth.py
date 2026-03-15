@@ -130,7 +130,8 @@ async def init_session_handler(
 
     await message.reply(
         f"🔄 Initializing session for {email}.\n"
-        "Please wait for the authorization link request..."
+        "Please wait for the authorization link request...\n\n"
+        "💡 When you receive the link, reply to the bot's message with it."
     )
 
     logger.info(

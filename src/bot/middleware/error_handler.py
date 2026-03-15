@@ -38,6 +38,13 @@ class ErrorHandlerMiddleware(BaseMiddleware):
         Returns:
             Handler result or None if error occurred
         """
+        if isinstance(event, Message):
+            logger.info(
+                "Incoming message: chat=%s thread=%s text=%s",
+                event.chat.id,
+                event.message_thread_id,
+                (event.text or "")[:80],
+            )
         try:
             return await handler(event, data)
         except BotError as e:

@@ -141,8 +141,8 @@ class SessionManagementService:
             logger.info(f"Email sent confirmation for session {session_path}")
 
             return (
-                "📧 Email sent! Please send me the authorization link "
-                "from your inbox."
+                "📧 Email sent! Please reply to this message with "
+                "the authorization link from your inbox."
             )
 
         except PlaywrightTimeoutError as e:
@@ -191,15 +191,19 @@ class SessionManagementService:
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 wait_until="domcontentloaded",
             )
+            await page.wait_for_load_state("networkidle")
             await self._save_debug(page, session_path, "04_magic_link")
 
             await self._dismiss_cookie_popup(page)
 
             # Wait for authenticated state — user menu or chat interface
-            await page.wait_for_selector(
-                'button[aria-label="User menu"], '
-                '[data-testid="user-menu"], '
-                'text=/[Nn]ew [Cc]hat|[Ss]tart a|[Cc]laude/',
+            authenticated = (
+                page.locator('button[aria-label="User menu"]')
+                .or_(page.locator('[data-testid="user-menu"]'))
+                .or_(page.get_by_text("New chat"))
+                .or_(page.get_by_text("Start a"))
+            )
+            await authenticated.first.wait_for(
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 state="visible",
             )

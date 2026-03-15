@@ -73,10 +73,28 @@ async def test__process_login__success__returns_success_message(
     from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 
     page = _make_page()
-    cookie_locator = AsyncMock()
-    cookie_locator.first = cookie_locator
-    cookie_locator.click = AsyncMock(side_effect=PlaywrightTimeoutError("no popup"))
-    page.locator.return_value = cookie_locator
+
+    # Authenticated locator: supports .or_() chain and .first.wait_for()
+    auth_locator = MagicMock()
+    auth_locator.or_ = MagicMock(return_value=auth_locator)
+    auth_locator.first = AsyncMock()
+    auth_locator.first.wait_for = AsyncMock()
+
+    def locator_side_effect(selector: str) -> MagicMock:
+        if "Reject All Cookies" in selector:
+            cookie_mock = AsyncMock()
+            cookie_mock.first = cookie_mock
+            cookie_mock.click = AsyncMock(
+                side_effect=PlaywrightTimeoutError("no popup")
+            )
+            return cookie_mock
+        return auth_locator
+
+    page.locator.side_effect = locator_side_effect
+
+    text_locator = MagicMock()
+    text_locator.or_ = MagicMock(return_value=auth_locator)
+    page.get_by_text.return_value = text_locator
 
     context = _make_context(page)
     playwright = _make_playwright(context)
