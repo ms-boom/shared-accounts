@@ -77,18 +77,22 @@ async def test__extract_code__code_found__returns_code(tmp_path: Path) -> None:
     cookie_locator.first = cookie_locator
     cookie_locator.click = AsyncMock(side_effect=PlaywrightTimeoutError("no popup"))
 
+    # Authorize button — not present (timeout)
+    authorize_locator = AsyncMock()
+    authorize_locator.wait_for = AsyncMock(
+        side_effect=PlaywrightTimeoutError("no button")
+    )
+
     code_locator = AsyncMock()
     code_locator.first = code_locator
     code_locator.wait_for = AsyncMock()
     code_locator.text_content = AsyncMock(return_value="ABCD1234")
 
-    call_count = 0
-
     def locator_side_effect(selector: str) -> AsyncMock:
-        nonlocal call_count
         if "Reject All" in selector or "Accept All" in selector:
             return cookie_locator
-        call_count += 1
+        if "Authorize" in selector:
+            return authorize_locator
         return code_locator
 
     page.locator.side_effect = locator_side_effect

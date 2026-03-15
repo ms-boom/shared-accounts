@@ -281,6 +281,18 @@ class SessionManagementService:
 
             await self._dismiss_cookie_popup(page)
 
+            # Click "Authorize" button if present (OAuth consent screen)
+            authorize_btn = page.locator('button:has-text("Authorize")')
+            try:
+                await authorize_btn.wait_for(timeout=5000, state="visible")
+                await authorize_btn.click()
+                logger.info(f"Clicked Authorize button for {session_path}")
+                await self._save_debug(page, session_path, "07_after_authorize")
+            except PlaywrightTimeoutError:
+                # No Authorize button — code may already be on page
+                logger.debug("No Authorize button found, looking for code directly")
+
+            # Wait for code to appear after authorization
             code_element = None
             selectors = [
                 "code",
@@ -294,7 +306,7 @@ class SessionManagementService:
                 try:
                     code_element = page.locator(selector).first
                     await code_element.wait_for(
-                        timeout=5000,
+                        timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                         state="visible",
                     )
                     break
@@ -302,16 +314,15 @@ class SessionManagementService:
                     continue
 
             if not code_element:
-                await page.wait_for_load_state("networkidle")
-                await self._save_debug(page, session_path, "06_no_code_found")
+                await self._save_debug(page, session_path, "07_no_code_found")
 
                 code_text = await page.locator(
-                    "text=/^[A-Z0-9]{8,}$/"
-                ).first.text_content()
+                    "text=/^[A-Za-z0-9_-]{20,}$/"
+                ).first.text_content(timeout=5000)
 
                 if code_text:
                     logger.info(
-                        f"Extracted code for session {session_path}"
+                        f"Extracted code via regex for session {session_path}"
                     )
                     assert isinstance(code_text, str)
                     return code_text.strip()
