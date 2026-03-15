@@ -212,16 +212,11 @@ class SessionManagementService:
 
             await self._dismiss_cookie_popup(page)
 
-            # Step 2: Verify session by navigating to settings/usage
-            await page.goto(
-                "https://claude.ai/settings/usage",
-                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
-                wait_until="domcontentloaded",
-            )
-            await self._save_debug(page, session_path, "05_usage_page")
-
-            usage_indicator = page.get_by_text("usage", exact=False)
-            await usage_indicator.first.wait_for(
+            # Step 2: Verify authentication — wait for chat input
+            # After successful login, Claude redirects to the main page
+            # with the chat input form (data-testid="chat-input").
+            chat_input = page.locator('[data-testid="chat-input"]')
+            await chat_input.first.wait_for(
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 state="visible",
             )
