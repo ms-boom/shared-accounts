@@ -127,7 +127,7 @@ async def main() -> None:
     dp.include_router(group_events.router)
     dp.include_router(group_admin.router)
 
-    # Start task worker as inline asyncio task (shares SQLiteWriterQueue with bot)
+    # SQLite allows only one writer — worker must share the same process and SQLiteWriterQueue
     worker = TaskWorker(database, settings, TelegramNotifier(bot))
     worker_task = asyncio.create_task(worker.run(), name="task-worker")
     worker_task.add_done_callback(_on_worker_done)

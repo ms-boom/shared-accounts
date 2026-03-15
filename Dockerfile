@@ -44,5 +44,4 @@ RUN uv run playwright install-deps
 RUN mkdir -p /data/sessions /data/logs /data/errors && \
     chmod 700 /data/sessions
 
-# Run bot (includes inline worker)
 CMD ["uv", "run", "python", "-m", "bot"]

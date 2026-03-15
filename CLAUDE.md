@@ -88,7 +88,7 @@
 ├── Taskfile.yaml                 # Task runner команды
 ├── .pre-commit-config.yaml       # Pre-commit hooks
 ├── docker-compose.yml            # Docker окружение
-├── Dockerfile                    # Образ для бота (включая inline worker)
+├── Dockerfile                    # Образ для бота
 └── alembic.ini                   # Конфигурация миграций
 
 ```
@@ -511,6 +511,12 @@ features/FEAT-0001-claude-auth-bot/
    - Все внешние вызовы должны иметь timeout
    - Timeout не должен маскировать логические ошибки
 
+8. **Комментарии объясняют "почему", код показывает "что"**
+   - Комментарий отвечает на вопрос "почему так сделано" (контекст, ограничения, бизнес-правила)
+   - Не описывать в комментариях что было изменено — это задача git history
+   - Запрещены комментарии вида: "Changed X to Y", "Added for support of Z", "Replaced old approach", "Now uses...", "Previously was..."
+   - Если комментарий читается как commit message — он не нужен в коде
+
 ---
 
 ## Примеры паттернов из кодовой базы
@@ -692,7 +698,7 @@ CLI использует те же сервисы:
 Файл: `docker-compose.yml`
 
 **Сервисы:**
-- `bot` — Telegram Bot service (включая inline TaskWorker)
+- `bot` — Telegram Bot service
 
 **Volumes:**
 - `bot_data` — данные бота (сессии, SQLite БД, логи)
