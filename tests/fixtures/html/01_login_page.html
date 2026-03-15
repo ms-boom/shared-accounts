@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en-US" data-theme="claude" data-mode="light">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude</title>
+</head>
+<body class="bg-bg-100 text-text-100 font-ui min-h-screen">
+  <div id="root">
+    <div class="root">
+      <nav>
+        <a href="#">
+          <svg viewBox="0 0 112 24" height="24"><!-- Claude logo --></svg>
+        </a>
+      </nav>
+      <main>
+        <h2>Think fast, build faster</h2>
+        <div class="login-form">
+          <div class="flex flex-col gap-5">
+            <button class="google-login">Continue with Google</button>
+            <div class="divider">or</div>
+            <input type="email" placeholder="Enter your email" />
+            <button type="submit">Continue with email</button>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Cookie consent banner -->
+  <div data-testid="consent-banner">
+    <h3>Cookie settings</h3>
+    <p>We use cookies to deliver and improve our services.</p>
+    <button data-testid="consent-customize">Customize Cookie Settings</button>
+    <button data-testid="consent-reject">Reject All Cookies</button>
+    <button data-testid="consent-accept">Accept All Cookies</button>
+  </div>
+</body>
+</html>
