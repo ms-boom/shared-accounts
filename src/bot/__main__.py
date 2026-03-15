@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from bot.adapters.telegram_notifier import TelegramNotifier
 from bot.container import create_container
 from bot.db.fsm_storage import BotFSMStorage
 from bot.handlers import claude_auth, common, group_admin, group_events
@@ -19,6 +20,7 @@ from core.db.database import Database
 from core.logging_config import setup_logging
 from core.services.group_service import GroupService
 from core.services.user_service import UserService
+from core.worker.task_worker import TaskWorker
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,17 @@ async def on_shutdown(bot: Bot, database: Database) -> None:
     await bot.session.close()
 
     logger.info("Bot shutdown complete")
+
+
+def _on_worker_done(task: asyncio.Task) -> None:
+    """Log unexpected worker task exit without crashing the bot."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Task worker exited unexpectedly: %s", exc, exc_info=exc)
+    else:
+        logger.warning("Task worker finished without error (unexpected during polling)")
 
 
 async def main() -> None:
@@ -114,6 +127,11 @@ async def main() -> None:
     dp.include_router(group_events.router)
     dp.include_router(group_admin.router)
 
+    # Start task worker as inline asyncio task (shares SQLiteWriterQueue with bot)
+    worker = TaskWorker(database, settings, TelegramNotifier(bot))
+    worker_task = asyncio.create_task(worker.run(), name="task-worker")
+    worker_task.add_done_callback(_on_worker_done)
+
     try:
         # Start polling
         logger.info("Starting polling...")
@@ -123,7 +141,11 @@ async def main() -> None:
     except Exception as e:
         logger.exception(f"Error during polling: {e}")
     finally:
-        # Shutdown
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
         await on_shutdown(bot, database)
 
 

@@ -88,8 +88,7 @@
 ├── Taskfile.yaml                 # Task runner команды
 ├── .pre-commit-config.yaml       # Pre-commit hooks
 ├── docker-compose.yml            # Docker окружение
-├── Dockerfile                    # Образ для бота
-├── Dockerfile.worker             # Образ для worker
+├── Dockerfile                    # Образ для бота (включая inline worker)
 └── alembic.ini                   # Конфигурация миграций
 
 ```
@@ -178,19 +177,21 @@ class UserRepository:
 ### 5. Worker Pattern + Task Queue
 
 ```
-Bot Service (aiogram)
+Bot Process (aiogram + inline TaskWorker)
     ↓
-SQLite Tasks Queue (SQLiteWriterQueue serializes writes)
+SQLite Tasks Queue (single SQLiteWriterQueue serializes all writes)
     ↓
-Worker Service
+TaskWorker (asyncio.Task inside bot process)
     ↓
 Playwright (headless browser)
 ```
 
 **Ключевые особенности:**
+- Worker встроен в bot process как `asyncio.Task` (один SQLiteWriterQueue на все записи)
 - Асинхронная обработка тяжелых задач (headless browser operations)
 - SQLite как очередь задач с `SQLiteWriterQueue` для сериализации записей
 - Retry механизм с экспоненциальной задержкой (2s, 4s, 8s)
+- Standalone worker (`python -m core.worker`) остаётся для отладки
 
 ### 6. SQLite FSM Storage
 
@@ -691,8 +692,7 @@ CLI использует те же сервисы:
 Файл: `docker-compose.yml`
 
 **Сервисы:**
-- `bot` — Telegram Bot service
-- `worker` — Task Worker service
+- `bot` — Telegram Bot service (включая inline TaskWorker)
 
 **Volumes:**
 - `bot_data` — данные бота (сессии, SQLite БД, логи)
