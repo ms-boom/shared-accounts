@@ -300,11 +300,15 @@ async def handle_claude_url(
         return
 
     # Check if message contains Claude login URL
-    if not ValidationService.is_claude_login_url(message.text.strip()):
+    url = message.text.strip()
+    if not ValidationService.is_claude_login_url(url):
         return
 
-    login_url = message.text.strip()
+    login_url = url
     thread_id = get_thread_id(message)
+    logger.info(
+        f"Detected Claude login URL in chat {message.chat.id}/{thread_id}"
+    )
 
     # Read: check for pending init_session (read-only, direct session is fine)
     async with database.read() as db_session:
@@ -325,6 +329,10 @@ async def handle_claude_url(
             break
 
     if not init_task:
+        logger.warning(
+            f"No init_session task found for chat {message.chat.id}/{thread_id}, "
+            f"recent tasks: {[(t['task_type'], t['status']) for t in recent_tasks]}"
+        )
         await message.reply(
             "ℹ️ This looks like a Claude login link.\n\n"
             "If you want to initialize a session, please run /init_session <email> first."

@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Update
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from core.exceptions import BotError
 
@@ -17,6 +17,8 @@ class ErrorHandlerMiddleware(BaseMiddleware):
     Middleware for global error handling.
 
     Catches exceptions in handlers and provides user-friendly error messages.
+    Registered on dp.message / dp.callback_query — receives Message or
+    CallbackQuery, NOT Update.
     """
 
     async def __call__(
@@ -30,7 +32,7 @@ class ErrorHandlerMiddleware(BaseMiddleware):
 
         Args:
             handler: Next handler in chain
-            event: Telegram event
+            event: Telegram event (Message or CallbackQuery)
             data: Handler data
 
         Returns:
@@ -39,11 +41,9 @@ class ErrorHandlerMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         except BotError as e:
-            # Known bot errors - log and inform user
             logger.warning(f"Bot error: {e}")
             await self._send_error_message(event, str(e))
         except Exception as e:
-            # Unknown errors - log with stack trace
             logger.exception(f"Unexpected error: {e}")
             await self._send_error_message(event, "Произошла ошибка. Попробуйте позже.")
         return None
@@ -53,13 +53,13 @@ class ErrorHandlerMiddleware(BaseMiddleware):
         Send error message to user.
 
         Args:
-            event: Telegram event
+            event: Telegram event (Message or CallbackQuery)
             message: Error message to send
         """
         try:
-            if isinstance(event, Update) and event.message:
-                await event.message.reply(f"❌ {message}")
-            elif isinstance(event, Update) and event.callback_query:
-                await event.callback_query.answer(message, show_alert=True)
+            if isinstance(event, Message):
+                await event.reply(f"❌ {message}")
+            elif isinstance(event, CallbackQuery):
+                await event.answer(message, show_alert=True)
         except Exception as e:
             logger.error(f"Failed to send error message: {e}")
