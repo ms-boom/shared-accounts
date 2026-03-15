@@ -14,7 +14,7 @@ class ValidationService:
         r"https://claude\.ai/(login\?token=|magic-link[#?]).+"
     )
     CLAUDE_AUTH_URL_PATTERN = re.compile(
-        r"https://claude\.ai/(auth/authorize|login/authorize)\?.+"
+        r"https://claude\.ai/(auth/authorize|login/authorize|oauth/authorize)\?.+"
     )
 
     @classmethod

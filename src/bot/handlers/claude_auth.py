@@ -178,7 +178,7 @@ async def get_code_handler(
     if len(parts) < 2:
         await message.reply(
             "❌ Please provide the Claude authorization URL.\n\n"
-            "Usage: /get_code https://claude.ai/auth/authorize?..."
+            "Usage: /get_code https://claude.ai/oauth/authorize?..."
         )
         return
 
@@ -188,7 +188,7 @@ async def get_code_handler(
     if not ValidationService.is_claude_auth_url(auth_url):
         await message.reply(
             "❌ Invalid auth URL format. Please provide a valid Claude authorization URL.\n\n"
-            "Expected format: https://claude.ai/auth/authorize?..."
+            "Expected format: https://claude.ai/oauth/authorize?..."
         )
         return
 
