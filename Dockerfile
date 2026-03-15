@@ -28,18 +28,22 @@ RUN apt-get update && apt-get install -y \
 # Install uv for dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy project files
-COPY pyproject.toml uv.lock README.md ./
+# Install dependencies (cached layer — rebuilds only when lock changes)
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
+
+# Install Patchright browser (cached layer — rebuilds only when patchright version changes)
+RUN uv run patchright install chrome && \
+    uv run patchright install-deps
+
+# Copy project source code (changes here don't rebuild layers above)
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
+COPY README.md ./
 
-# Install dependencies
+# Install the project itself (fast — dependencies already cached)
 RUN uv sync --frozen
-
-# Install Patchright browser (Chrome for better stealth)
-RUN uv run patchright install chrome
-RUN uv run patchright install-deps
 
 # Create data directories
 RUN mkdir -p /data/sessions /data/logs /data/errors && \
