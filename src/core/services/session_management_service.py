@@ -115,13 +115,21 @@ class SessionManagementService:
             await self._save_debug(page, session_path, "02_after_submit")
 
             # Claude shows either verification code input or "Check your email"
+            code_input = page.locator(
+                'input[name="code"], '
+                'input[placeholder*="verification"], '
+                'input[placeholder*="code"]'
+            )
+            confirmation_text = page.get_by_text(
+                "Check your email"
+            ).or_(page.get_by_text(
+                "verification code"
+            )).or_(page.get_by_text(
+                "Verify"
+            ))
+            combined = code_input.or_(confirmation_text)
             try:
-                await page.wait_for_selector(
-                    'input[name="code"], '
-                    'input[placeholder*="verification"], '
-                    'input[placeholder*="code"], '
-                    'text=/[Cc]heck your email|[Ee]mail sent|'
-                    '[Vv]erification code|[Vv]erify/',
+                await combined.first.wait_for(
                     timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 )
             except PlaywrightTimeoutError:
