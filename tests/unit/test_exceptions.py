@@ -1,4 +1,4 @@
-"""Unit tests for bot/core/exceptions.py."""
+"""Tests for exception hierarchy and message handling."""
 
 import pytest
 
@@ -14,135 +14,68 @@ from core.exceptions import (
     UserNotFoundError,
 )
 
+ALL_EXCEPTION_CLASSES = [
+    BotError,
+    ConfigurationError,
+    DatabaseError,
+    PermissionError,
+    GroupNotFoundError,
+    UserNotFoundError,
+    BrowserError,
+    SessionError,
+    TaskError,
+]
 
-@pytest.mark.unit
-class TestExceptionHierarchy:
-    """Tests for exception class hierarchy."""
 
-    def test_bot_error_is_base_exception(self) -> None:
-        """Test that BotError is base for all bot exceptions."""
-        error = BotError("test error")
-
-        assert isinstance(error, Exception)
-        assert str(error) == "test error"
-
-    def test_configuration_error_inherits_from_bot_error(self) -> None:
-        """Test that ConfigurationError inherits from BotError."""
-        error = ConfigurationError("config error")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "config error"
-
-    def test_database_error_inherits_from_bot_error(self) -> None:
-        """Test that DatabaseError inherits from BotError."""
-        error = DatabaseError("database error")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "database error"
-
-    def test_permission_error_inherits_from_bot_error(self) -> None:
-        """Test that PermissionError inherits from BotError."""
-        error = PermissionError("permission denied")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "permission denied"
-
-    def test_group_not_found_error_inherits_from_bot_error(self) -> None:
-        """Test that GroupNotFoundError inherits from BotError."""
-        error = GroupNotFoundError("group not found")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "group not found"
-
-    def test_user_not_found_error_inherits_from_bot_error(self) -> None:
-        """Test that UserNotFoundError inherits from BotError."""
-        error = UserNotFoundError("user not found")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "user not found"
-
-    def test_browser_error_inherits_from_bot_error(self) -> None:
-        """Test that BrowserError inherits from BotError."""
-        error = BrowserError("browser error")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "browser error"
-
-    def test_session_error_inherits_from_bot_error(self) -> None:
-        """Test that SessionError inherits from BotError."""
-        error = SessionError("session error")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "session error"
-
-    def test_task_error_inherits_from_bot_error(self) -> None:
-        """Test that TaskError inherits from BotError."""
-        error = TaskError("task error")
-
-        assert isinstance(error, BotError)
-        assert isinstance(error, Exception)
-        assert str(error) == "task error"
+# --- Hierarchy ---
 
 
 @pytest.mark.unit
-class TestExceptionMessages:
-    """Tests for exception message handling."""
+def test__bot_error__is_base_exception() -> None:
+    error = BotError("test error")
+    assert isinstance(error, Exception)
+    assert str(error) == "test error"
 
-    def test_exceptions_preserve_message(self) -> None:
-        """Test that all exceptions preserve error messages."""
-        test_message = "detailed error message"
 
-        exceptions_to_test = [
-            BotError,
-            ConfigurationError,
-            DatabaseError,
-            PermissionError,
-            GroupNotFoundError,
-            UserNotFoundError,
-            BrowserError,
-            SessionError,
-            TaskError,
-        ]
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "exc_class",
+    [cls for cls in ALL_EXCEPTION_CLASSES if cls is not BotError],
+    ids=lambda c: c.__name__,
+)
+def test__exception__inherits_from_bot_error(exc_class) -> None:
+    error = exc_class("some error")
+    assert isinstance(error, BotError)
+    assert isinstance(error, Exception)
+    assert str(error) == "some error"
 
-        for exception_class in exceptions_to_test:
-            error = exception_class(test_message)
-            assert str(error) == test_message
 
-    def test_exceptions_can_be_raised_and_caught(self) -> None:
-        """Test that exceptions can be raised and caught properly."""
-        with pytest.raises(DatabaseError) as exc_info:
-            raise DatabaseError("test database error")
+# --- Messages ---
 
-        assert str(exc_info.value) == "test database error"
-        assert isinstance(exc_info.value, BotError)
 
-    def test_can_catch_specific_exception(self) -> None:
-        """Test catching specific exception type."""
-        caught = False
+@pytest.mark.unit
+@pytest.mark.parametrize("exc_class", ALL_EXCEPTION_CLASSES, ids=lambda c: c.__name__)
+def test__exception__preserves_message(exc_class) -> None:
+    msg = "detailed error message"
+    assert str(exc_class(msg)) == msg
 
-        try:
-            raise UserNotFoundError("user 123 not found")
-        except UserNotFoundError as e:
-            caught = True
-            assert str(e) == "user 123 not found"
 
-        assert caught
+@pytest.mark.unit
+def test__exception__can_be_raised_and_caught() -> None:
+    with pytest.raises(DatabaseError) as exc_info:
+        raise DatabaseError("test database error")
 
-    def test_can_catch_base_exception(self) -> None:
-        """Test catching exception via base class."""
-        caught = False
+    assert str(exc_info.value) == "test database error"
+    assert isinstance(exc_info.value, BotError)
 
-        try:
-            raise TaskError("task failed")
-        except BotError as e:
-            caught = True
-            assert str(e) == "task failed"
 
-        assert caught
+@pytest.mark.unit
+def test__exception__catch_specific_type() -> None:
+    with pytest.raises(UserNotFoundError, match="user 123 not found"):
+        raise UserNotFoundError("user 123 not found")
+
+
+@pytest.mark.unit
+def test__exception__catch_via_base_class() -> None:
+    with pytest.raises(BotError, match="task failed"):
+        raise TaskError("task failed")
