@@ -285,11 +285,15 @@ class SessionManagementService:
             authorize_btn = page.locator('button:has-text("Authorize")')
             try:
                 await authorize_btn.wait_for(timeout=5000, state="visible")
-                await authorize_btn.click()
+                async with page.expect_navigation(
+                    timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                    wait_until="domcontentloaded",
+                ):
+                    await authorize_btn.click()
                 logger.info(f"Clicked Authorize button for {session_path}")
                 await self._save_debug(page, session_path, "07_after_authorize")
             except PlaywrightTimeoutError:
-                # No Authorize button — code may already be on page
+                # No Authorize button or no navigation after click
                 logger.debug("No Authorize button found, looking for code directly")
 
             # Wait for code to appear after authorization

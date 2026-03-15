@@ -159,6 +159,20 @@ class FakePage:
     async def wait_for_load_state(self, state: str = "load") -> None:
         pass
 
+    def expect_navigation(self, **kwargs: object) -> _FakeNavigationContext:
+        """Fake async context manager for page.expect_navigation()."""
+        return _FakeNavigationContext()
+
+
+class _FakeNavigationContext:
+    """Async context manager that does nothing (navigation happens via state machine)."""
+
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: object) -> bool:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # FakeBrowserContext & FakePlaywright
@@ -242,6 +256,55 @@ def build_login_scenario(
     page._html = {
         "login_page": _load_html("01_login_page.html"),
         "email_sent": _load_html("02_after_submit.html"),
+    }
+
+    return page
+
+
+def build_extract_code_scenario(
+    *,
+    has_authorize_button: bool = True,
+    auth_code: str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9_fakecode",
+    code_in_selector: str = "code",
+    code_in_value: bool = False,
+    has_cookie_popup: bool = False,
+) -> FakePage:
+    """Build FakePage for extract_code scenario (OAuth consent → code page).
+
+    Args:
+        has_authorize_button: Whether OAuth consent screen has Authorize button.
+        auth_code: Authorization code to display after authorization.
+        code_in_selector: CSS selector where code appears ("code", "input[name=\\"code\\"]", etc).
+        code_in_value: If True, code is in element value (not text).
+        has_cookie_popup: Whether cookie consent banner is shown.
+    """
+    page = FakePage()
+
+    page._url_to_state = {"oauth/authorize": "consent_screen"}
+
+    # -- Consent screen state --
+    consent_css: dict[str, FakeElement] = {}
+    if has_cookie_popup:
+        consent_css["Reject All Cookies"] = FakeElement()
+    if has_authorize_button:
+        consent_css["Authorize"] = FakeElement(
+            on_click_goto_state="code_page",
+        )
+    page._css_elements["consent_screen"] = consent_css
+
+    # -- Code page state (after Authorize click) --
+    code_element = FakeElement(
+        text="" if code_in_value else auth_code,
+        value=auth_code if code_in_value else "",
+    )
+    page._css_elements["code_page"] = {
+        code_in_selector: code_element,
+    }
+
+    # -- HTML fixtures --
+    page._html = {
+        "consent_screen": _load_html("06_auth_page.html"),
+        "code_page": _load_html("07_after_authorize.html"),
     }
 
     return page
