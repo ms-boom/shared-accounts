@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from uuid import UUID
 
 from aiogram import Bot
 
@@ -105,7 +104,7 @@ class TaskWorker:
         Args:
             task: Task data from database
         """
-        task_id: UUID = task["id"] if isinstance(task["id"], UUID) else UUID(task["id"])
+        task_id: str = str(task["id"])
         task_type = task["task_type"]
         chat_id = task["chat_id"]
         thread_id = task.get("thread_id", 0)
@@ -166,7 +165,7 @@ class TaskWorker:
 
     async def process_init_session(
         self,
-        task_id: UUID,
+        task_id: str,
         chat_id: int,
         thread_id: int,
         payload: dict,
@@ -176,7 +175,7 @@ class TaskWorker:
         Process init_session task.
 
         Args:
-            task_id: Task UUID
+            task_id: Task ID string
             chat_id: Telegram chat_id
             thread_id: Telegram thread_id
             payload: Task payload with 'email' field
@@ -213,7 +212,7 @@ class TaskWorker:
 
     async def process_login_link(
         self,
-        task_id: UUID,
+        task_id: str,
         chat_id: int,
         thread_id: int,
         payload: dict,
@@ -223,7 +222,7 @@ class TaskWorker:
         Process login link to complete authentication.
 
         Args:
-            task_id: Task UUID
+            task_id: Task ID string
             chat_id: Telegram chat_id
             thread_id: Telegram thread_id
             payload: Task payload with 'login_url' field
@@ -252,7 +251,7 @@ class TaskWorker:
 
     async def process_get_code(
         self,
-        task_id: UUID,
+        task_id: str,
         chat_id: int,
         thread_id: int,
         payload: dict,
@@ -262,7 +261,7 @@ class TaskWorker:
         Process get_code task.
 
         Args:
-            task_id: Task UUID
+            task_id: Task ID string
             chat_id: Telegram chat_id
             thread_id: Telegram thread_id
             payload: Task payload with 'auth_url' field

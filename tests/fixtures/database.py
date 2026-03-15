@@ -13,19 +13,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    from tests.adapters import DatabasesAdapter
 import sqlalchemy as sa
 import sqlalchemy.event
 import sqlalchemy.ext.asyncio
 import sqlalchemy.orm
 from alembic.command import upgrade
 from alembic.config import Config
-from databases import Database
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -35,8 +30,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 import bot.db.database as db  # Import production database module
-from bot.db.database import register_sqlite_pragmas
 from bot.core.config import Settings
+from bot.db.database import register_sqlite_pragmas
+from tests.adapters import DatabasesAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +99,8 @@ def migrations(test_settings: Settings) -> None:
     # Create Alembic config
     alembic_cfg = Config("alembic.ini")
 
-    # Set database URL for test database
-    db_url = test_settings.DATABASE_URL.replace("+asyncpg", "")
-    db_url = db_url.replace("postgresql", "postgresql+psycopg2")
+    # Set database URL for test database (convert async driver to sync for Alembic)
+    db_url = test_settings.DATABASE_URL.replace("+aiosqlite", "")
     alembic_cfg.set_main_option("sqlalchemy.url", db_url)
 
     # Run migrations
@@ -117,39 +112,15 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
     """AsyncEngine for test database.
 
     Session-scoped engine shared across all tests.
-    Supports both PostgreSQL and SQLite based on DATABASE_URL.
 
     Note: Database migrations must be applied before running tests.
     Locally run: alembic upgrade head
 
     Pattern from statements/tests/fixtures/db.py
     """
-    # Detect database type from URL
-    db_url = test_settings.DATABASE_URL.lower()
-    is_sqlite = db_url.startswith("sqlite")
-    is_postgres = "postgres" in db_url
-
-    # Configure connect_args based on database type
-    connect_args: dict = {}
-
-    if is_postgres:
-        # PostgreSQL-specific configuration
-        from bot.db.dialect import CConnection
-
-        connect_args = {
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-            "connection_class": CConnection,
-        }
-    elif is_sqlite:
-        # SQLite-specific configuration
-        connect_args = {
-            "check_same_thread": False,  # Allow usage across threads
-        }
-
-    # Create engine with appropriate pool settings
-    pool_size = 1 if is_sqlite else 5
-    max_overflow = 0 if is_sqlite else 10
+    connect_args = {"check_same_thread": False}
+    pool_size = 1
+    max_overflow = 0
 
     engine = create_async_engine(
         test_settings.DATABASE_URL,
@@ -162,15 +133,13 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
         connect_args=connect_args,
     )
 
-    if is_sqlite:
-        register_sqlite_pragmas(engine)
+    register_sqlite_pragmas(engine)
 
-    # Create tables for SQLite (in-memory DB needs schema)
-    if is_sqlite:
-        from bot.db.models import Base
+    # Create tables (SQLite in-memory/temp DB needs schema)
+    from bot.db.models import Base
 
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
     yield engine
 
@@ -265,24 +234,6 @@ async def db_session(
 
 
 @pytest.fixture
-async def test_database(test_settings: Settings) -> AsyncGenerator[Database, None]:
-    """Legacy databases.Database fixture for backward compatibility.
-
-    This fixture provides a databases.Database connection for tests that use it.
-    New code should prefer using db_session fixture with SQLAlchemy.
-
-    Note: This creates a NEW connection outside of the transaction context,
-    so it won't see uncommitted changes from db_session. Use with caution.
-    """
-    database = Database(test_settings.DATABASE_URL)
-    await database.connect()
-
-    yield database
-
-    await database.disconnect()
-
-
-@pytest.fixture
 async def test_database_adapter(
     db_session: AsyncSession,
 ) -> AsyncGenerator[DatabasesAdapter, None]:
@@ -290,10 +241,5 @@ async def test_database_adapter(
 
     This fixture provides a databases.Database-compatible interface
     while using SQLAlchemy AsyncSession for better transaction isolation.
-
-    Recommended for migrating tests from test_database to db_session
-    without modifying repository code.
     """
-    from tests.adapters import DatabasesAdapter
-
     yield DatabasesAdapter(db_session)

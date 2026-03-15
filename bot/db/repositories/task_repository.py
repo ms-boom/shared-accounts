@@ -6,10 +6,8 @@ Pattern from statements/ - repository accepts session, doesn't manage transactio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
-from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
@@ -50,11 +48,11 @@ class TaskRepository:
         """
         self.session = session
 
-    async def get_by_id(self, task_id: UUID) -> dict | None:
+    async def get_by_id(self, task_id: str) -> dict | None:
         """Get task by ID.
 
         Args:
-            task_id: Task UUID
+            task_id: Task ID (UUID string)
 
         Returns:
             Task data as dict or None if not found
@@ -115,7 +113,7 @@ class TaskRepository:
 
     async def update_status(
         self,
-        task_id: UUID,
+        task_id: str,
         status: str,
         expected_version: int,
         result: str | None = None,
@@ -166,38 +164,23 @@ class TaskRepository:
     async def dequeue_pending_task(self) -> dict | None:
         """Dequeue next pending task and mark it as processing.
 
-        Uses SELECT FOR UPDATE with optimistic locking.
-        PostgreSQL uses SKIP LOCKED for better concurrency.
-        SQLite uses regular FOR UPDATE (less concurrent but simpler).
+        SQLiteWriterQueue serializes all writes through a single asyncio queue,
+        so concurrent dequeue operations within the same process are not possible.
+        A simple SELECT without locking is sufficient.
 
         Returns:
             Task data as dict or None if no pending tasks
 
         Raises:
             DatabaseError: If database operation fails
-
-        Note:
-            Must be called within a transaction.
-            Uses pessimistic locking to prevent race conditions.
         """
         try:
-            # Detect database type from session bind
-            dialect_name = self.session.bind.dialect.name if self.session.bind else "sqlite"
-
-            # Select and lock the next pending task
             stmt = (
                 sa.select(Task)
                 .where(Task.status == "pending")
                 .order_by(Task.created_at.asc())
                 .limit(1)
             )
-
-            # PostgreSQL supports SKIP LOCKED for better concurrency
-            if dialect_name == "postgresql":
-                stmt = stmt.with_for_update(skip_locked=True)
-            else:
-                # SQLite doesn't support SKIP LOCKED, use regular FOR UPDATE
-                stmt = stmt.with_for_update()
 
             result = await self.session.execute(stmt)
             task = result.scalar_one_or_none()
@@ -213,10 +196,6 @@ class TaskRepository:
             await self.session.flush()
             logger.info(f"Dequeued task {task.id} for processing")
             return _row_to_dict(task)
-        except OperationalError as e:
-            # SQLite busy_timeout exhausted or PostgreSQL lock contention
-            logger.debug(f"OperationalError dequeuing task (likely lock contention): {e}")
-            return None
         except Exception as e:
             logger.error(f"Failed to dequeue pending task: {e}")
             raise DatabaseError(f"Failed to dequeue pending task: {e}") from e

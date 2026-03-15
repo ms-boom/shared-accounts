@@ -1,4 +1,4 @@
-"""Dialect-aware FSM storage for aiogram."""
+"""SQLite FSM storage for aiogram."""
 
 from collections.abc import Mapping
 from typing import Any, cast
@@ -6,37 +6,37 @@ from typing import Any, cast
 from aiogram.fsm.state import State
 from aiogram.fsm.storage.base import BaseStorage, StateType, StorageKey
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.db.database import SQLiteWriterQueue
 from bot.db.models import FSMState
-from bot.db.upsert import build_upsert
 
 _CONFLICT_COLUMNS = ["chat_id", "user_id", "thread_id"]
 
 
 class BotFSMStorage(BaseStorage):
-    """Dialect-aware FSM storage for aiogram.
+    """SQLite FSM storage for aiogram.
 
-    Supports both PostgreSQL and SQLite backends. For SQLite, routes write
-    operations through SQLiteWriterQueue to prevent concurrent write conflicts.
+    Routes write operations through SQLiteWriterQueue to prevent concurrent
+    write conflicts.
 
     Attributes:
         session_maker: SQLAlchemy async session factory
-        writer_queue: Optional queue for serializing SQLite writes
+        writer_queue: Queue for serializing SQLite writes
     """
 
     def __init__(
         self,
         session_maker: async_sessionmaker[AsyncSession],
-        writer_queue: SQLiteWriterQueue | None = None,
+        writer_queue: SQLiteWriterQueue,
     ) -> None:
         """
         Initialize FSM storage.
 
         Args:
             session_maker: SQLAlchemy async session factory
-            writer_queue: Writer queue for SQLite serialization. None for PostgreSQL.
+            writer_queue: Writer queue for SQLite write serialization.
         """
         self.session_maker = session_maker
         self.writer_queue = writer_queue
@@ -47,17 +47,18 @@ class BotFSMStorage(BaseStorage):
         self, session: AsyncSession, key: StorageKey, state_name: str | None
     ) -> None:
         """Execute upsert for state column only."""
-        stmt = build_upsert(
-            FSMState,
-            values={
-                "chat_id": key.chat_id,
-                "user_id": key.user_id,
-                "thread_id": key.thread_id or 0,
-                "state": state_name,
-            },
-            conflict_columns=_CONFLICT_COLUMNS,
-            update_columns={"state": state_name},
-            session=session,
+        stmt = (
+            sqlite_insert(FSMState)
+            .values(
+                chat_id=key.chat_id,
+                user_id=key.user_id,
+                thread_id=key.thread_id or 0,
+                state=state_name,
+            )
+            .on_conflict_do_update(
+                index_elements=_CONFLICT_COLUMNS,
+                set_={"state": state_name},
+            )
         )
         await session.execute(stmt)
 
@@ -65,17 +66,18 @@ class BotFSMStorage(BaseStorage):
         self, session: AsyncSession, key: StorageKey, data_dict: dict[str, Any]
     ) -> None:
         """Execute upsert for data column only."""
-        stmt = build_upsert(
-            FSMState,
-            values={
-                "chat_id": key.chat_id,
-                "user_id": key.user_id,
-                "thread_id": key.thread_id or 0,
-                "data": data_dict,
-            },
-            conflict_columns=_CONFLICT_COLUMNS,
-            update_columns={"data": data_dict},
-            session=session,
+        stmt = (
+            sqlite_insert(FSMState)
+            .values(
+                chat_id=key.chat_id,
+                user_id=key.user_id,
+                thread_id=key.thread_id or 0,
+                data=data_dict,
+            )
+            .on_conflict_do_update(
+                index_elements=_CONFLICT_COLUMNS,
+                set_={"data": data_dict},
+            )
         )
         await session.execute(stmt)
 
@@ -91,14 +93,9 @@ class BotFSMStorage(BaseStorage):
         """
         state_name = state.state if isinstance(state, State) else state
 
-        if self.writer_queue is not None:
-            await self.writer_queue.execute(
-                lambda s: self._write_state(s, key, state_name)
-            )
-        else:
-            async with self.session_maker() as session:
-                await self._write_state(session, key, state_name)
-                await session.commit()
+        await self.writer_queue.execute(
+            lambda s: self._write_state(s, key, state_name)
+        )
 
     async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
         """
@@ -110,14 +107,9 @@ class BotFSMStorage(BaseStorage):
         """
         data_dict = dict(data)
 
-        if self.writer_queue is not None:
-            await self.writer_queue.execute(
-                lambda s: self._write_data(s, key, data_dict)
-            )
-        else:
-            async with self.session_maker() as session:
-                await self._write_data(session, key, data_dict)
-                await session.commit()
+        await self.writer_queue.execute(
+            lambda s: self._write_data(s, key, data_dict)
+        )
 
     async def update_data(
         self, key: StorageKey, data: Mapping[str, Any]
@@ -143,14 +135,9 @@ class BotFSMStorage(BaseStorage):
 
         merged_data = {**existing_data, **data}
 
-        if self.writer_queue is not None:
-            await self.writer_queue.execute(
-                lambda s: self._write_data(s, key, merged_data)
-            )
-        else:
-            async with self.session_maker() as session:
-                await self._write_data(session, key, merged_data)
-                await session.commit()
+        await self.writer_queue.execute(
+            lambda s: self._write_data(s, key, merged_data)
+        )
 
         return merged_data
 

@@ -21,10 +21,10 @@ class Settings(BaseSettings):
         description="Bot token from @BotFather",
     )
 
-    # Database Configuration (PostgreSQL or SQLite)
+    # Database Configuration (SQLite only)
     DATABASE_URL: str = Field(
         default="sqlite+aiosqlite:////data/claude_bot.db",
-        description="Database connection URL (PostgreSQL or SQLite)",
+        description="SQLite database connection URL",
     )
 
     # Logging Configuration
@@ -98,6 +98,17 @@ class Settings(BaseSettings):
         default=60,
         description="Interval in seconds for stuck task recovery checks",
     )
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def validate_sqlite_url(cls, value: str) -> str:
+        """Validate that DATABASE_URL uses SQLite. Only SQLite is supported."""
+        if not value.lower().startswith("sqlite"):
+            raise ValueError(
+                f"Only SQLite is supported. DATABASE_URL must start with 'sqlite', "
+                f"got: '{value[:20]}...'"
+            )
+        return value
 
     @field_validator("DATA_DIR", "SESSION_DIR", "LOG_DIR", "ERROR_DIR")
     @classmethod

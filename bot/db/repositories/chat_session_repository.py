@@ -7,11 +7,11 @@ import logging
 from datetime import datetime
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
 from bot.db.models import ChatSession
-from bot.db.upsert import build_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -195,22 +195,21 @@ class ChatSessionRepository:
             DatabaseError: If database operation fails
         """
         try:
-            stmt = build_upsert(
-                ChatSession,
-                values={
-                    "chat_id": chat_id,
-                    "thread_id": thread_id,
-                    "email": email,
-                    "session_path": session_path,
-                    "created_at": datetime.utcnow(),
-                },
-                conflict_columns=["chat_id", "thread_id"],
-                update_columns={
-                    "email": email,
-                    "session_path": session_path,
-                },
-                session=self.session,
-            ).returning(ChatSession)
+            stmt = (
+                sqlite_insert(ChatSession)
+                .values(
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    email=email,
+                    session_path=session_path,
+                    created_at=datetime.utcnow(),
+                )
+                .on_conflict_do_update(
+                    index_elements=["chat_id", "thread_id"],
+                    set_={"email": email, "session_path": session_path},
+                )
+                .returning(ChatSession)
+            )
 
             result = await self.session.execute(stmt)
             await self.session.flush()
@@ -223,40 +222,6 @@ class ChatSessionRepository:
                 f"Failed to upsert chat session for {chat_id}/{thread_id}: {e}"
             )
             raise DatabaseError(f"Failed to upsert chat session: {e}") from e
-
-    async def lock_for_update(self, chat_id: int, thread_id: int = 0) -> dict | None:
-        """
-        Lock chat session for update (prevents concurrent initialization).
-
-        Args:
-            chat_id: Telegram chat_id
-            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
-
-        Returns:
-            Locked chat session data as dict or None if not found
-
-        Raises:
-            DatabaseError: If database operation fails
-
-        Note:
-            Must be called within a transaction.
-            Other transactions will wait or skip (SKIP LOCKED) this row.
-        """
-        try:
-            stmt = (
-                sa.select(ChatSession)
-                .where(
-                    ChatSession.chat_id == chat_id,
-                    ChatSession.thread_id == thread_id,
-                )
-                .with_for_update()
-            )
-            result = await self.session.execute(stmt)
-            session_obj = result.scalar_one_or_none()
-            return _row_to_dict(session_obj) if session_obj else None
-        except Exception as e:
-            logger.error(f"Failed to lock chat session {chat_id}/{thread_id}: {e}")
-            raise DatabaseError(f"Failed to lock chat session: {e}") from e
 
     async def get_all_active(self) -> list[dict]:
         """

@@ -35,7 +35,6 @@ def setup_logging(settings: Settings) -> None:
 
     # Set specific log levels for noisy libraries
     logging.getLogger("aiogram").setLevel(logging.INFO)
-    logging.getLogger("databases").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 
     # Log startup message

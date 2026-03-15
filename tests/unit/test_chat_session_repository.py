@@ -293,31 +293,6 @@ class TestChatSessionRepository:
         assert main_session["email"] == "main@example.com"
         assert topic_session["email"] == "topic@example.com"
 
-    @pytest.mark.skip(
-        reason="Requires PostgreSQL FOR UPDATE - SQLite doesn't support row locking"
-    )
-    async def test_lock_for_update_with_thread_id(
-        self, chat_session_repo: ChatSessionRepository
-    ) -> None:
-        """Test locking session for update with thread_id."""
-        chat_id = 123456
-        thread_id = 888
-
-        # Create session
-        await chat_session_repo.create(
-            chat_id=chat_id,
-            thread_id=thread_id,
-            email="test@example.com",
-            session_path="/data/sessions/123456/888",
-        )
-
-        # Lock session (this would normally be inside a transaction)
-        locked = await chat_session_repo.lock_for_update(chat_id, thread_id)
-
-        assert locked is not None
-        assert locked["chat_id"] == chat_id
-        assert locked["thread_id"] == thread_id
-
     async def test_get_all_active_includes_all_threads(
         self, chat_session_repo: ChatSessionRepository
     ) -> None:

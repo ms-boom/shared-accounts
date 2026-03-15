@@ -120,10 +120,7 @@ class TestSettings:
         settings = Settings(TELEGRAM_TOKEN="123456:test")
 
         # Check DATABASE_URL default value
-        assert (
-            settings.DATABASE_URL
-            == "postgresql+asyncpg://user:password@localhost/claude_bot"
-        )
+        assert settings.DATABASE_URL == "sqlite+aiosqlite:////data/claude_bot.db"
         assert settings.LOG_LEVEL == "INFO"
         assert settings.DEBUG is False
         assert settings.PERMISSION_CACHE_TTL == 300

@@ -14,7 +14,7 @@
 - **Поддержка Telegram Topics** — независимые сессии для каждого топика в супергруппе
 - Извлечение авторизационных кодов из Claude через headless браузер (Playwright)
 - Групповое использование с контролем доступа (только админы инициализируют сессии)
-- Очередь задач через PostgreSQL с поддержкой параллельной обработки
+- Очередь задач через SQLite с поддержкой параллельной обработки
 - Изолированные браузерные сессии для каждого чата и топика
 - Автоматическая обработка ошибок и повторные попытки
 
@@ -31,9 +31,9 @@
 │   │   ├── exceptions.py         # Кастомные исключения
 │   │   └── logging_config.py     # Настройка структурированного логирования
 │   ├── db/                        # Слой работы с БД
-│   │   ├── database.py           # Подключение к БД (databases + asyncpg)
+│   │   ├── database.py           # Подключение к БД (SQLAlchemy + aiosqlite)
 │   │   ├── models.py             # SQLAlchemy модели
-│   │   ├── fsm_storage.py        # PostgreSQL FSM Storage для aiogram
+│   │   ├── fsm_storage.py        # SQLite FSM Storage для aiogram
 │   │   └── repositories/         # Repository Pattern
 │   │       ├── chat_session_repository.py
 │   │       ├── group_repository.py
@@ -129,7 +129,7 @@
 └──────────────┬─────────────────┘
                │
 ┌──────────────▼─────────────────┐
-│   Database / External Services │  PostgreSQL, Playwright
+│   Database / External Services │  SQLite, Playwright
 └────────────────────────────────┘
 ```
 
@@ -162,11 +162,11 @@ container.register(Database, scope=punq.Scope.singleton)
 ```python
 # bot/db/repositories/user_repository.py
 class UserRepository:
-    def __init__(self, database: Database):
-        self.db = database
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
     async def get_by_id(self, user_id: int) -> dict | None:
-        # SQL запрос через databases library
+        # SQL запрос через SQLAlchemy AsyncSession
         ...
 ```
 
@@ -180,42 +180,45 @@ class UserRepository:
 ```
 Bot Service (aiogram)
     ↓
-PostgreSQL Tasks Queue (FOR UPDATE SKIP LOCKED)
+SQLite Tasks Queue (SQLiteWriterQueue serializes writes)
     ↓
-Worker Service (1+ instances)
+Worker Service
     ↓
 Playwright (headless browser)
 ```
 
 **Ключевые особенности:**
 - Асинхронная обработка тяжелых задач (headless browser operations)
-- Горизонтальное масштабирование workers
-- PostgreSQL как очередь с `SELECT FOR UPDATE SKIP LOCKED`
+- SQLite как очередь задач с `SQLiteWriterQueue` для сериализации записей
 - Retry механизм с экспоненциальной задержкой (2s, 4s, 8s)
 
-### 6. PostgreSQL FSM Storage
+### 6. SQLite FSM Storage
 
-Состояния FSM (Finite State Machine) для aiogram хранятся в PostgreSQL:
+Состояния FSM (Finite State Machine) для aiogram хранятся в SQLite:
 
 ```python
 # bot/db/fsm_storage.py
-class PostgreSQLStorage(BaseStorage):
-    """PostgreSQL-based FSM storage for aiogram."""
+class BotFSMStorage(BaseStorage):
+    """SQLite-based FSM storage for aiogram."""
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+    def __init__(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+        writer_queue: SQLiteWriterQueue,
+    ) -> None:
         self.session_maker = session_maker
+        self.writer_queue = writer_queue
 ```
 
 **Преимущества:**
 - Персистентность состояний (сохраняются при перезапуске бота)
 - Поддержка Topics через композитный ключ (chat_id, user_id, thread_id)
-- Thread-safe конкурентный доступ
-- Хранение данных в JSONB для гибкости
+- Сериализация записей через `SQLiteWriterQueue` (без конкурентных конфликтов)
 
 **Таблица FSM:**
 - Композитный PRIMARY KEY: `(chat_id, user_id, thread_id)`
 - Поле `state`: текущее состояние FSM (nullable)
-- Поле `data`: JSONB для хранения данных состояния
+- Поле `data`: JSON для хранения данных состояния
 - Автоматическое обновление `updated_at`
 
 ### 7. Изоляция браузерных сессий
@@ -244,11 +247,10 @@ class PostgreSQLStorage(BaseStorage):
 | **Python** | 3.12+ | Основной язык |
 | **aiogram** | 3.13+ | Telegram Bot framework (async) |
 | **Playwright** | 1.40+ | Headless browser automation |
-| **PostgreSQL** | 15+ | БД + очередь задач + FSM Storage |
+| **SQLite** | 3.35+ | БД + очередь задач + FSM Storage |
 | **SQLAlchemy** | 2.0+ | ORM (async) + FSM Storage |
 | **Alembic** | 1.14+ | Database migrations |
-| **asyncpg** | 0.30+ | Async PostgreSQL driver |
-| **databases** | 0.9+ | Query builder (async) |
+| **aiosqlite** | 0.20+ | Async SQLite driver |
 | **Pydantic** | 2.10+ | Data validation + Settings |
 | **punq** | 0.7+ | Dependency Injection |
 | **structlog** | 23.0+ | Structured logging |
@@ -334,7 +336,7 @@ task lint:ruff        # Проверка без изменений
 - `disallow_untyped_decorators = false` — важно для aiogram декораторов
 
 **Ignore missing imports:**
-- `aiogram.*`, `punq.*`, `databases.*`, `playwright.*`, `structlog.*`
+- `aiogram.*`, `punq.*`, `playwright.*`, `structlog.*`
 
 **Использование:**
 ```bash
@@ -689,14 +691,11 @@ CLI использует те же сервисы:
 Файл: `docker-compose.yml`
 
 **Сервисы:**
-- `postgres` — PostgreSQL 15
 - `bot` — Telegram Bot service
-- `worker` — Task Worker service (может масштабироваться)
+- `worker` — Task Worker service
 
 **Volumes:**
-- `/data/sessions` — браузерные сессии (персистентные)
-- `/data/logs` — логи
-- `postgres_data` — данные БД
+- `bot_data` — данные бота (сессии, SQLite БД, логи)
 
 ### Environment Variables
 
@@ -706,8 +705,8 @@ CLI использует те же сервисы:
 # Required
 TELEGRAM_TOKEN=your_bot_token_here
 
-# Database
-DATABASE_URL=postgresql+asyncpg://user:pass@postgres/claude_bot
+# Database (SQLite only)
+DATABASE_URL=sqlite+aiosqlite:////data/claude_bot.db
 
 # Optional
 LOG_LEVEL=INFO

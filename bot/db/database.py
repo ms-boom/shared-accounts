@@ -1,4 +1,4 @@
-"""Database configuration and session management.
+"""Database configuration and session management for SQLite.
 
 Pattern from statements/ project - global Session with proper configuration.
 
@@ -87,7 +87,6 @@ class SQLiteWriterQueue:
     even with busy_timeout. The queue ensures writes execute one at a time
     within the same process.
 
-    Only instantiated for SQLite. PostgreSQL uses direct session access.
     """
 
     def __init__(self, session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -170,12 +169,10 @@ class SQLiteWriterQueue:
 
 
 async def setup(settings: Settings) -> AsyncEngine:
-    """Initialize database engine and configure global Session.
+    """Initialize SQLite database engine and configure global Session.
 
     This should be called once at application startup.
     Pattern from statements/db.py with simplified pool settings.
-
-    Supports both PostgreSQL (asyncpg) and SQLite (aiosqlite).
 
     Args:
         settings: Application settings
@@ -190,36 +187,10 @@ async def setup(settings: Settings) -> AsyncEngine:
         assert isinstance(bind, AsyncEngine), "Session bind must be AsyncEngine"
         return bind
 
-    # Detect database type from URL
-    db_url = settings.DATABASE_URL.lower()
-    is_sqlite = db_url.startswith("sqlite")
-    is_postgres = "postgres" in db_url
-
-    # Configure connect_args based on database type
-    connect_args: dict = {}
-
-    if is_postgres:
-        # PostgreSQL-specific configuration
-        from bot.db.dialect import CConnection
-
-        connect_args = {
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-            "connection_class": CConnection,
-        }
-        logger.info("Using PostgreSQL database with asyncpg driver")
-
-    elif is_sqlite:
-        # SQLite-specific configuration
-        connect_args = {
-            "check_same_thread": False,  # Allow usage across threads
-        }
-        logger.info("Using SQLite database with aiosqlite driver")
-
-    # Create engine with connection pooling
-    # SQLite doesn't need large pool, use smaller values
-    pool_size = 1 if is_sqlite else 5
-    max_overflow = 0 if is_sqlite else 10
+    connect_args = {"check_same_thread": False}
+    pool_size = 1
+    max_overflow = 0
+    logger.info("Using SQLite database with aiosqlite driver")
 
     engine = create_async_engine(
         settings.DATABASE_URL,
@@ -232,9 +203,7 @@ async def setup(settings: Settings) -> AsyncEngine:
         connect_args=connect_args,
     )
 
-    # Register SQLite PRAGMAs before the engine is used
-    if is_sqlite:
-        register_sqlite_pragmas(engine)
+    register_sqlite_pragmas(engine)
 
     # Configure global Session with engine
     Session.configure(bind=engine)
@@ -269,7 +238,7 @@ class Database:
         """
         self.settings = settings
         self._engine: AsyncEngine | None = None
-        self.writer_queue: SQLiteWriterQueue | None = None  # None for PostgreSQL
+        self.writer_queue: SQLiteWriterQueue | None = None
 
     @property
     def session_maker(self) -> sa.orm.sessionmaker:
@@ -283,13 +252,12 @@ class Database:
     async def startup(self) -> None:
         """Initialize database engine and configure global Session.
 
-        For SQLite databases, also creates and starts the writer queue to
-        serialize concurrent write operations within the same process.
+        Creates and starts the writer queue to serialize concurrent write
+        operations within the same process.
         """
         self._engine = await setup(self.settings)
-        if self.settings.DATABASE_URL.lower().startswith("sqlite"):
-            self.writer_queue = SQLiteWriterQueue(self.session_maker)  # type: ignore[arg-type]
-            await self.writer_queue.start()
+        self.writer_queue = SQLiteWriterQueue(self.session_maker)  # type: ignore[arg-type]
+        await self.writer_queue.start()
 
     async def shutdown(self) -> None:
         """Dispose database engine and cleanup resources.
