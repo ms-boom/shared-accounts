@@ -12,6 +12,7 @@ def _make_settings() -> MagicMock:
 
     settings = MagicMock(spec=Settings)
     settings.PLAYWRIGHT_TIMEOUT = 30000
+    settings.BROWSER_DEBUG = True
     return settings
 
 

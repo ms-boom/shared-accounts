@@ -13,6 +13,7 @@ def _make_settings(**overrides) -> MagicMock:
 
     settings = MagicMock(spec=Settings)
     settings.PLAYWRIGHT_TIMEOUT = overrides.get("timeout", 30000)
+    settings.BROWSER_DEBUG = overrides.get("browser_debug", True)
     return settings
 
 
@@ -49,6 +50,35 @@ async def test__save_debug__saves_screenshot_and_html(tmp_path: Path) -> None:
     page.content.assert_called_once()
     assert (debug_dir / "test_step.html").exists()
     assert (debug_dir / "test_step.html").read_text() == "<html>test</html>"
+
+
+@pytest.mark.unit
+async def test__save_debug__browser_debug_off__skips_non_error(tmp_path: Path) -> None:
+    page = _make_page()
+    settings = _make_settings(browser_debug=False)
+    pw = MagicMock()
+    pw.chromium.launch_persistent_context = AsyncMock()
+    service = SessionManagementService(settings=settings, playwright=pw)
+
+    await service._save_debug(page, tmp_path, "01_login_page")
+
+    page.screenshot.assert_not_called()
+    page.content.assert_not_called()
+    assert not (tmp_path / "debug").exists()
+
+
+@pytest.mark.unit
+async def test__save_debug__browser_debug_off__saves_error_steps(tmp_path: Path) -> None:
+    page = _make_page()
+    settings = _make_settings(browser_debug=False)
+    pw = MagicMock()
+    pw.chromium.launch_persistent_context = AsyncMock()
+    service = SessionManagementService(settings=settings, playwright=pw)
+
+    await service._save_debug(page, tmp_path, "error_init")
+
+    page.screenshot.assert_called_once()
+    assert (tmp_path / "debug" / "error_init.html").exists()
 
 
 @pytest.mark.unit

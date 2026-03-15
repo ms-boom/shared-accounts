@@ -66,6 +66,12 @@ class Settings(BaseSettings):
         description="Directory for error screenshots",
     )
 
+    # Debug Settings
+    BROWSER_DEBUG: bool = Field(
+        default=False,
+        description="Enable browser debug mode (save screenshots + HTML on each step)",
+    )
+
     # Playwright Settings
     PLAYWRIGHT_HEADLESS: bool = Field(
         default=True,

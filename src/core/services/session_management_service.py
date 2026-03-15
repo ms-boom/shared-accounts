@@ -55,6 +55,10 @@ class SessionManagementService:
         self, page: Page, session_path: Path, step_name: str
     ) -> None:
         """Save screenshot and HTML for debugging."""
+        is_error = step_name.startswith("error_")
+        if not is_error and not self.settings.BROWSER_DEBUG:
+            return
+
         debug_dir = session_path / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
 
@@ -171,7 +175,8 @@ class SessionManagementService:
         """
         Process Claude login link to complete authentication.
 
-        Opens the magic link URL in persistent context to authenticate.
+        Opens the magic link URL in persistent context, then verifies
+        the session by navigating to /settings/usage.
         """
         if not session_path.exists():
             raise SessionError(
@@ -196,14 +201,17 @@ class SessionManagementService:
 
             await self._dismiss_cookie_popup(page)
 
-            # Wait for authenticated state — user menu or chat interface
-            authenticated = (
-                page.locator('button[aria-label="User menu"]')
-                .or_(page.locator('[data-testid="user-menu"]'))
-                .or_(page.get_by_text("New chat"))
-                .or_(page.get_by_text("Start a"))
+            # Verify session by navigating to settings/usage
+            await page.goto(
+                "https://claude.ai/settings/usage",
+                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                wait_until="domcontentloaded",
             )
-            await authenticated.first.wait_for(
+            await page.wait_for_load_state("networkidle")
+            await self._save_debug(page, session_path, "05_usage_page")
+
+            usage_indicator = page.get_by_text("usage", exact=False)
+            await usage_indicator.first.wait_for(
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 state="visible",
             )
