@@ -1,6 +1,7 @@
 """Middleware for automatic group registration."""
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,13 +13,17 @@ from core.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
+# Skip DB writes if entity was seen within this window
+_CACHE_TTL_SECONDS = 300
+
 
 class GroupTrackerMiddleware(BaseMiddleware):
     """
     Middleware that automatically registers groups and users.
 
     Ensures that every group and user interacting with the bot
-    is registered in the database.
+    is registered in the database. Uses in-memory cache to avoid
+    hitting the database on every message.
     """
 
     def __init__(self, group_service: GroupService, user_service: UserService):
@@ -31,6 +36,8 @@ class GroupTrackerMiddleware(BaseMiddleware):
         """
         self.group_service = group_service
         self.user_service = user_service
+        self._seen_users: dict[int, float] = {}
+        self._seen_groups: dict[int, float] = {}
 
     async def __call__(
         self,
@@ -50,8 +57,9 @@ class GroupTrackerMiddleware(BaseMiddleware):
             Handler result
         """
         if isinstance(event, Message):
-            # Register user if present
-            if event.from_user:
+            now = time.monotonic()
+
+            if event.from_user and not self._is_cached(self._seen_users, event.from_user.id, now):
                 try:
                     await self.user_service.register_user(
                         user_id=event.from_user.id,
@@ -60,11 +68,15 @@ class GroupTrackerMiddleware(BaseMiddleware):
                         last_name=event.from_user.last_name,
                         language_code=event.from_user.language_code,
                     )
+                    self._seen_users[event.from_user.id] = now
                 except Exception as e:
                     logger.error(f"Failed to register user: {e}")
 
-            # Register group if message is from group
-            if event.chat and event.chat.type in ["group", "supergroup"]:
+            if (
+                event.chat
+                and event.chat.type in ["group", "supergroup"]
+                and not self._is_cached(self._seen_groups, event.chat.id, now)
+            ):
                 try:
                     await self.group_service.register_group(
                         chat_id=event.chat.id,
@@ -72,7 +84,13 @@ class GroupTrackerMiddleware(BaseMiddleware):
                         username=event.chat.username,
                         chat_type=event.chat.type,
                     )
+                    self._seen_groups[event.chat.id] = now
                 except Exception as e:
                     logger.error(f"Failed to register group: {e}")
 
         return await handler(event, data)
+
+    @staticmethod
+    def _is_cached(cache: dict[int, float], entity_id: int, now: float) -> bool:
+        last_seen = cache.get(entity_id)
+        return last_seen is not None and (now - last_seen) < _CACHE_TTL_SECONDS

@@ -1,12 +1,24 @@
 """Unit tests for core/services/user_service.py."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.db.database import Database
 from core.services.user_service import UserService
+
+
+def _make_writer_queue_mock(session_maker: async_sessionmaker[AsyncSession]) -> MagicMock:
+    """Create a writer_queue mock that executes fn through the test session."""
+
+    async def _execute(fn):  # noqa: ANN001
+        async with session_maker() as session, session.begin():
+            return await fn(session)
+
+    mock = MagicMock()
+    mock.execute = AsyncMock(side_effect=_execute)
+    return mock
 
 
 @pytest.mark.unit
@@ -28,6 +40,7 @@ class TestUserService:
         """
         mock_db = MagicMock(spec=Database)
         mock_db.session_maker = db_sessionmaker
+        mock_db.writer_queue = _make_writer_queue_mock(db_sessionmaker)
 
         return UserService(mock_db)
 

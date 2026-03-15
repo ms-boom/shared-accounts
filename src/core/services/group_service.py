@@ -2,6 +2,8 @@
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.db.database import Database
 from core.db.repositories.group_repository import GroupRepository
 
@@ -30,6 +32,9 @@ class GroupService:
         """
         Register a new group or update existing one.
 
+        Routes through SQLiteWriterQueue to avoid pool contention
+        with other writers sharing pool_size=1.
+
         Args:
             chat_id: Telegram chat_id
             title: Group title
@@ -39,12 +44,12 @@ class GroupService:
         Returns:
             Group data as dict
         """
-        async with self.db.session_maker() as session, session.begin():
+
+        async def _do_register(session: AsyncSession) -> dict:
             repository = GroupRepository(session)
             existing = await repository.get_by_id(chat_id)
 
             if existing:
-                # Update existing group info
                 logger.info(f"Updating existing group: {chat_id}")
                 return await repository.update(
                     chat_id=chat_id,
@@ -52,7 +57,6 @@ class GroupService:
                     username=username,
                 )
             else:
-                # Create new group
                 logger.info(f"Registering new group: {chat_id}")
                 return await repository.create(
                     chat_id=chat_id,
@@ -60,6 +64,8 @@ class GroupService:
                     username=username,
                     chat_type=chat_type,
                 )
+
+        return await self.db.writer_queue.execute(_do_register)
 
     async def get_group(self, group_id: int) -> dict | None:
         """
@@ -103,10 +109,13 @@ class GroupService:
         Returns:
             Updated group data
         """
-        async with self.db.session_maker() as session, session.begin():
+
+        async def _do_update(session: AsyncSession) -> dict:
             repository = GroupRepository(session)
             return await repository.update(
                 chat_id=group_id,
                 title=title,
                 username=username,
             )
+
+        return await self.db.writer_queue.execute(_do_update)

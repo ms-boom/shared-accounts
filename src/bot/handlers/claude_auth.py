@@ -6,6 +6,8 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.config import Settings
 from core.db.database import Database
 from core.db.repositories.chat_session_repository import ChatSessionRepository
@@ -90,45 +92,51 @@ async def init_session_handler(
         )
         return
 
-    # Check for existing session and create task using SQLAlchemy session
+    # Check for existing session and create task
     thread_id = get_thread_id(message)
 
-    async with database.session_maker() as session, session.begin():
+    # Read: check existing session (read-only, direct session is fine)
+    async with database.session_maker() as session:
         session_repo = ChatSessionRepository(session)
         existing_session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
-        if existing_session:
-            await message.reply(
-                f"⚠️ Session already exists for this chat (email: {existing_session['email']}).\n\n"
-                f"Do you want to replace it with {email}? Reply 'yes' to confirm."
-            )
-            # TODO: Implement confirmation flow with FSM
-            return
+    if existing_session:
+        await message.reply(
+            f"⚠️ Session already exists for this chat (email: {existing_session['email']}).\n\n"
+            f"Do you want to replace it with {email}? Reply 'yes' to confirm."
+        )
+        # TODO: Implement confirmation flow with FSM
+        return
 
-        # Create task
-        if not message.from_user:
-            await message.reply("❌ Unable to identify user.")
-            return
+    if not message.from_user:
+        await message.reply("❌ Unable to identify user.")
+        return
 
+    # Write: create task through writer_queue
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    payload = {"email": email}
+
+    async def _create_task(session: AsyncSession) -> dict:
         task_repo = TaskRepository(session)
-        payload = {"email": email}
-
-        task = await task_repo.create(
-            chat_id=message.chat.id,
-            user_id=message.from_user.id,
+        return await task_repo.create(
+            chat_id=chat_id,
+            user_id=user_id,
             task_type="init_session",
             payload=payload,
             thread_id=thread_id,
         )
 
-        await message.reply(
-            f"🔄 Initializing session for {email}.\n"
-            "Please wait for the authorization link request..."
-        )
+    task = await database.writer_queue.execute(_create_task)
 
-        logger.info(
-            f"Created init_session task {task['id']} for chat {message.chat.id}/{thread_id}"
-        )
+    await message.reply(
+        f"🔄 Initializing session for {email}.\n"
+        "Please wait for the authorization link request..."
+    )
+
+    logger.info(
+        f"Created init_session task {task['id']} for chat {chat_id}/{thread_id}"
+    )
 
 
 @router.message(Command("get_code"))
@@ -146,64 +154,70 @@ async def get_code_handler(
         message: Incoming message
         database: Database connection
     """
-    # Check for existing session and create task using SQLAlchemy session
+    # Check for existing session and create task
     thread_id = get_thread_id(message)
 
-    async with database.session_maker() as db_session, db_session.begin():
+    # Read: check existing session (read-only, direct session is fine)
+    async with database.session_maker() as db_session:
         session_repo = ChatSessionRepository(db_session)
         session = await session_repo.get_by_chat_id(message.chat.id, thread_id)
 
-        if not session:
-            await message.reply(
-                "❌ No active session found for this chat.\n\n"
-                "Run /init_session <email> first to initialize a session."
-            )
-            return
+    if not session:
+        await message.reply(
+            "❌ No active session found for this chat.\n\n"
+            "Run /init_session <email> first to initialize a session."
+        )
+        return
 
-        # Parse URL from command
-        if not message.text:
-            await message.reply("❌ Usage: /get_code <url>")
-            return
+    # Parse URL from command
+    if not message.text:
+        await message.reply("❌ Usage: /get_code <url>")
+        return
 
-        parts = message.text.split(maxsplit=1)
-        if len(parts) < 2:
-            await message.reply(
-                "❌ Please provide the Claude authorization URL.\n\n"
-                "Usage: /get_code https://claude.ai/auth/authorize?..."
-            )
-            return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply(
+            "❌ Please provide the Claude authorization URL.\n\n"
+            "Usage: /get_code https://claude.ai/auth/authorize?..."
+        )
+        return
 
-        auth_url = parts[1].strip()
+    auth_url = parts[1].strip()
 
-        # Validate URL
-        if not ValidationService.is_claude_auth_url(auth_url):
-            await message.reply(
-                "❌ Invalid auth URL format. Please provide a valid Claude authorization URL.\n\n"
-                "Expected format: https://claude.ai/auth/authorize?..."
-            )
-            return
+    # Validate URL
+    if not ValidationService.is_claude_auth_url(auth_url):
+        await message.reply(
+            "❌ Invalid auth URL format. Please provide a valid Claude authorization URL.\n\n"
+            "Expected format: https://claude.ai/auth/authorize?..."
+        )
+        return
 
-        # Create task
-        if not message.from_user:
-            await message.reply("❌ Unable to identify user.")
-            return
+    if not message.from_user:
+        await message.reply("❌ Unable to identify user.")
+        return
 
-        task_repo = TaskRepository(db_session)
-        payload = {"auth_url": auth_url}
+    # Write: create task through writer_queue
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    payload = {"auth_url": auth_url}
 
-        task = await task_repo.create(
-            chat_id=message.chat.id,
-            user_id=message.from_user.id,
+    async def _create_task(session: AsyncSession) -> dict:
+        task_repo = TaskRepository(session)
+        return await task_repo.create(
+            chat_id=chat_id,
+            user_id=user_id,
             task_type="get_code",
             payload=payload,
             thread_id=thread_id,
         )
 
-        await message.reply("🔄 Extracting authorization code...")
+    task = await database.writer_queue.execute(_create_task)
 
-        logger.info(
-            f"Created get_code task {task['id']} for chat {message.chat.id}/{thread_id}"
-        )
+    await message.reply("🔄 Extracting authorization code...")
+
+    logger.info(
+        f"Created get_code task {task['id']} for chat {chat_id}/{thread_id}"
+    )
 
 
 @router.message(Command("health"))
@@ -295,48 +309,53 @@ async def handle_claude_url(
     login_url = message.text.strip()
     thread_id = get_thread_id(message)
 
-    # Check for pending init_session and create task using SQLAlchemy session
-    async with database.session_maker() as db_session, db_session.begin():
+    # Read: check for pending init_session (read-only, direct session is fine)
+    async with database.session_maker() as db_session:
         task_repo = TaskRepository(db_session)
         recent_tasks = await task_repo.get_by_chat_id(
             message.chat.id, limit=5, thread_id=thread_id
         )
 
-        # Find recent init_session task that's processing
-        init_task = None
-        for task in recent_tasks:
-            if task["task_type"] == "init_session" and task["status"] in [
-                "pending",
-                "processing",
-            ]:
-                init_task = task
-                break
+    # Find recent init_session task that's processing
+    init_task = None
+    for task in recent_tasks:
+        if task["task_type"] == "init_session" and task["status"] in [
+            "pending",
+            "processing",
+        ]:
+            init_task = task
+            break
 
-        if not init_task:
-            # No pending init_session, inform user
-            await message.reply(
-                "ℹ️ This looks like a Claude login link.\n\n"
-                "If you want to initialize a session, please run /init_session <email> first."
-            )
-            return
+    if not init_task:
+        await message.reply(
+            "ℹ️ This looks like a Claude login link.\n\n"
+            "If you want to initialize a session, please run /init_session <email> first."
+        )
+        return
 
-        # Create task to process login link
-        if not message.from_user:
-            await message.reply("❌ Unable to identify user.")
-            return
+    if not message.from_user:
+        await message.reply("❌ Unable to identify user.")
+        return
 
-        payload = {"login_url": login_url}
+    # Write: create task through writer_queue
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    payload = {"login_url": login_url}
 
-        task = await task_repo.create(
-            chat_id=message.chat.id,
-            user_id=message.from_user.id,
+    async def _create_task(session: AsyncSession) -> dict:
+        task_repo = TaskRepository(session)
+        return await task_repo.create(
+            chat_id=chat_id,
+            user_id=user_id,
             task_type="process_login_link",
             payload=payload,
             thread_id=thread_id,
         )
 
-        await message.reply("🔄 Processing login link...")
+    task = await database.writer_queue.execute(_create_task)
 
-        logger.info(
-            f"Created process_login_link task {task['id']} for chat {message.chat.id}/{thread_id}"
-        )
+    await message.reply("🔄 Processing login link...")
+
+    logger.info(
+        f"Created process_login_link task {task['id']} for chat {chat_id}/{thread_id}"
+    )
