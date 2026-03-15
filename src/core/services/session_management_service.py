@@ -191,23 +191,33 @@ class SessionManagementService:
             context = await self._create_persistent_context(session_path)
             page = context.pages[0] if context.pages else await context.new_page()
 
-            await page.goto(
-                login_url,
-                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
-                wait_until="domcontentloaded",
-            )
-            await page.wait_for_load_state("networkidle")
+            # Step 1: Open magic link
+            try:
+                await page.goto(
+                    login_url,
+                    timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                    wait_until="domcontentloaded",
+                )
+            except PlaywrightTimeoutError as e:
+                logger.error(
+                    f"Timeout loading magic link for {session_path}: {e}"
+                )
+                if page:
+                    await self._save_debug(page, session_path, "error_login")
+                raise BrowserError(
+                    "❌ Login link is invalid or expired. "
+                    "Please run init-session again."
+                ) from e
             await self._save_debug(page, session_path, "04_magic_link")
 
             await self._dismiss_cookie_popup(page)
 
-            # Verify session by navigating to settings/usage
+            # Step 2: Verify session by navigating to settings/usage
             await page.goto(
                 "https://claude.ai/settings/usage",
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 wait_until="domcontentloaded",
             )
-            await page.wait_for_load_state("networkidle")
             await self._save_debug(page, session_path, "05_usage_page")
 
             usage_indicator = page.get_by_text("usage", exact=False)
@@ -227,14 +237,16 @@ class SessionManagementService:
 
         except PlaywrightTimeoutError as e:
             logger.error(
-                f"Timeout during login for {session_path}: {e}"
+                f"Timeout verifying session for {session_path}: {e}"
             )
             if page:
                 await self._save_debug(page, session_path, "error_login")
             raise BrowserError(
-                "❌ Login link is invalid or expired. "
-                "Please run init-session again."
+                "❌ Session verification timed out. "
+                "Login may have succeeded — check debug screenshots."
             ) from e
+        except BrowserError:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to process login link for {session_path}: {e}"

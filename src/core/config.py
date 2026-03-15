@@ -78,8 +78,8 @@ class Settings(BaseSettings):
         description="Run Playwright in headless mode",
     )
     PLAYWRIGHT_TIMEOUT: int = Field(
-        default=30000,
-        description="Playwright operation timeout in milliseconds (default: 30s)",
+        default=60000,
+        description="Playwright operation timeout in milliseconds (default: 60s)",
     )
 
     # Worker Settings
