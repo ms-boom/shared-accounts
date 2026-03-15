@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from bot.core.config import Settings, get_settings
+from core.config import Settings, get_settings
 
 
 @pytest.mark.unit

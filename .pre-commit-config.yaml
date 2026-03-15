@@ -23,16 +23,24 @@ repos:
     rev: v1.13.0
     hooks:
       - id: mypy
-        args: [--config-file=pyproject.toml]
+        args: [--config-file=pyproject.toml, src/core, src/bot]
         additional_dependencies:
           - pydantic>=2.10
           - pydantic-settings>=2.0
           - sqlalchemy>=2.0
           - aiogram>=3.13
-          - databases>=0.9
-          - asyncpg>=0.30
           - alembic>=1.14
           - pytest>=7.4
           - pytest-asyncio>=0.21
           - playwright>=1.40
           - punq>=0.7
+
+  # Import Linter (architecture boundary enforcement)
+  - repo: local
+    hooks:
+      - id: lint-imports
+        name: Import Linter
+        language: system
+        entry: lint-imports
+        pass_filenames: false
+        types: [python]

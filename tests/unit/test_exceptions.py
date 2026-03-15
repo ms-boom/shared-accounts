@@ -2,7 +2,7 @@
 
 import pytest
 
-from bot.core.exceptions import (
+from core.exceptions import (
     BotError,
     BrowserError,
     ConfigurationError,

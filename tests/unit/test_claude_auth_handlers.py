@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 import pytest
 from aiogram.types import Chat, Message, User
 
-from bot.handlers.claude_auth import get_thread_id, validate_email
+from bot.handlers.claude_auth import get_thread_id
+from core.services.validation_service import ValidationService
+
+# Wrapper for backward compatibility with existing tests
+validate_email = ValidationService.validate_email
 
 
 @pytest.mark.unit

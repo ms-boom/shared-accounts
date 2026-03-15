@@ -3,8 +3,8 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.core.exceptions import UserNotFoundError
-from bot.db.repositories.user_repository import UserRepository
+from core.db.repositories.user_repository import UserRepository
+from core.exceptions import UserNotFoundError
 
 
 @pytest.mark.unit

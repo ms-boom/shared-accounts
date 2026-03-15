@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  PYTHON_SOURCE: bot  # TODO: Update to your package name if different
+  PYTHON_SOURCE: src
   TEST_SOURCE: tests
 
 tasks:
@@ -10,25 +10,23 @@ tasks:
     cmds:
       - task --list
 
-  # Development setup
   install:
     desc: Install development dependencies
     cmds:
       - uv sync --group dev
 
-  # Code formatting
   format:
     desc: Format code with ruff
     cmds:
       - ruff check --fix {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
       - ruff format {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
 
-  # Linting
   lint:
     desc: Run all linting tools
     cmds:
       - task: lint:ruff
       - task: lint:mypy
+      - task: lint:imports
 
   lint:ruff:
     desc: Run ruff linter and formatter checks
@@ -39,34 +37,16 @@ tasks:
   lint:mypy:
     desc: Run type checking with mypy
     cmds:
-      - mypy {{.PYTHON_SOURCE}}
+      - mypy src/core src/bot
 
-  # Database management
-  db:up:
-    desc: Start PostgreSQL database
+  lint:imports:
+    desc: Check import boundaries between layers
     cmds:
-      - docker-compose up -d postgres
-      - echo "Waiting for PostgreSQL to be ready..."
-      - sleep 5
-      - docker-compose exec postgres pg_isready -U postgres
+      - lint-imports
 
-  db:down:
-    desc: Stop PostgreSQL database
-    cmds:
-      - docker-compose down
-
-  db:reset:
-    desc: Reset test database (drop and recreate)
-    cmds:
-      - docker-compose exec postgres psql -U postgres -c "DROP DATABASE IF EXISTS claude_bot_test;"
-      - docker-compose exec postgres psql -U postgres -c "CREATE DATABASE claude_bot_test;"
-      - docker-compose exec postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE claude_bot_test TO postgres;"
-
-  # Testing
   test:
-    desc: Run tests with pytest (optionally specify test file or module with -- <path>)
+    desc: Run tests with pytest
     cmds:
-      - task: test:check-db
       - pytest {{.CLI_ARGS}}
 
   test:unit:
@@ -77,22 +57,13 @@ tasks:
   test:integration:
     desc: Run integration tests only
     cmds:
-      - task: test:check-db
       - pytest -m integration
-
-  test:check-db:
-    desc: Check if PostgreSQL is running and test database exists
-    internal: true
-    cmds:
-      - docker-compose exec postgres pg_isready -U postgres || (echo "PostgreSQL not running. Run 'task db:up' first." && exit 1)
-      - docker-compose exec postgres psql -U postgres -lqt | cut -d \| -f 1 | grep -qw claude_bot_test || (echo "claude_bot_test not found. Run 'task db:reset' to create it." && exit 1)
 
   coverage:
     desc: Run tests with coverage report
     cmds:
-      - pytest --cov={{.PYTHON_SOURCE}} --cov-report=html --cov-report=term-missing
+      - pytest --cov=src/core --cov=src/bot --cov-report=html --cov-report=term-missing
 
-  # Pre-commit hooks
   prek:install:
     desc: Install pre-commit hooks
     cmds:
@@ -108,19 +79,18 @@ tasks:
     cmds:
       - prek autoupdate
 
-  # Quality workflows
+  qa:
+    desc: Full quality assurance (format + lint + lint:imports + coverage)
+    cmds:
+      - task: format
+      - task: lint
+      - task: coverage
+
   check:
     desc: Run all quality checks (lint + test)
     cmds:
       - task: lint
       - task: test
-
-  qa:
-    desc: Full quality assurance (format + lint + test + coverage)
-    cmds:
-      - task: format
-      - task: lint
-      - task: coverage
 
   dev:
     desc: Development workflow (install + format + check)
@@ -150,13 +120,22 @@ tasks:
     cmds:
       - alembic current
 
-  # Bot running
+  # Running services
   run:
-    desc: Run the bot
+    desc: Run the Telegram bot
     cmds:
       - python -m bot
 
-  # Clean up
+  run:worker:
+    desc: Run the task worker standalone
+    cmds:
+      - python -m core.worker
+
+  run:cli:
+    desc: Run CLI
+    cmds:
+      - python -m core.cli
+
   clean:
     desc: Clean up temporary files and cache
     cmds:

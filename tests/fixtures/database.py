@@ -29,9 +29,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-import bot.db.database as db  # Import production database module
-from bot.core.config import Settings
-from bot.db.database import register_sqlite_pragmas
+import core.db.database as db  # Import production database module
+from core.config import Settings
+from core.db.database import register_sqlite_pragmas
 from tests.adapters import DatabasesAdapter
 
 logger = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
     register_sqlite_pragmas(engine)
 
     # Create tables (SQLite in-memory/temp DB needs schema)
-    from bot.db.models import Base
+    from core.db.models import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -1,13 +1,12 @@
-"""Unit tests for bot/services/user_service.py."""
+"""Unit tests for core/services/user_service.py."""
 
 from unittest.mock import MagicMock
 
 import pytest
-from aiogram.types import User
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.database import Database
-from bot.services.user_service import UserService
-from tests.adapters import DatabasesAdapter
+from core.db.database import Database
+from core.services.user_service import UserService
 
 
 @pytest.mark.unit
@@ -15,78 +14,55 @@ class TestUserService:
     """Tests for UserService class."""
 
     @pytest.fixture
-    async def user_service_with_real_db(
-        self, test_database_adapter: DatabasesAdapter
+    def user_service_with_real_db(
+        self, db_sessionmaker: async_sessionmaker[AsyncSession]
     ) -> UserService:
         """
         Create UserService with real database for integration-like tests.
 
         Args:
-            test_database_adapter: Test database adapter using db_session
+            db_sessionmaker: Test session factory bound to test transaction
 
         Returns:
             UserService instance
         """
         mock_db = MagicMock(spec=Database)
-        mock_db.get_connection.return_value = test_database_adapter
+        mock_db.session_maker = db_sessionmaker
 
         return UserService(mock_db)
-
-    @pytest.fixture
-    def telegram_user_full(self) -> User:
-        """
-        Create Telegram user with all fields.
-
-        Returns:
-            User instance with all fields populated
-        """
-        return User(
-            id=123456789,
-            is_bot=False,
-            first_name="Test",
-            last_name="User",
-            username="testuser",
-            language_code="en",
-        )
-
-    @pytest.fixture
-    def telegram_user_minimal(self) -> User:
-        """
-        Create Telegram user with minimal fields.
-
-        Returns:
-            User instance with only required fields
-        """
-        return User(
-            id=987654321,
-            is_bot=False,
-            first_name="Minimal",
-        )
 
     async def test_registers_new_user(
         self,
         user_service_with_real_db: UserService,
-        telegram_user_full: User,
     ) -> None:
         """Test registering a new user."""
-        result = await user_service_with_real_db.register_user(telegram_user_full)
+        result = await user_service_with_real_db.register_user(
+            user_id=123456789,
+            username="testuser",
+            first_name="Test",
+            last_name="User",
+            language_code="en",
+        )
 
-        assert result["id"] == telegram_user_full.id
-        assert result["username"] == telegram_user_full.username
-        assert result["first_name"] == telegram_user_full.first_name
-        assert result["last_name"] == telegram_user_full.last_name
-        assert result["language_code"] == telegram_user_full.language_code
+        assert result["id"] == 123456789
+        assert result["username"] == "testuser"
+        assert result["first_name"] == "Test"
+        assert result["last_name"] == "User"
+        assert result["language_code"] == "en"
 
     async def test_registers_user_with_minimal_fields(
         self,
         user_service_with_real_db: UserService,
-        telegram_user_minimal: User,
     ) -> None:
         """Test registering user with minimal required fields."""
-        result = await user_service_with_real_db.register_user(telegram_user_minimal)
+        result = await user_service_with_real_db.register_user(
+            user_id=987654321,
+            username=None,
+            first_name="Minimal",
+        )
 
-        assert result["id"] == telegram_user_minimal.id
-        assert result["first_name"] == telegram_user_minimal.first_name
+        assert result["id"] == 987654321
+        assert result["first_name"] == "Minimal"
         assert result["username"] is None
         assert result["last_name"] is None
         assert result["language_code"] is None
@@ -94,24 +70,27 @@ class TestUserService:
     async def test_updates_existing_user_on_register(
         self,
         user_service_with_real_db: UserService,
-        telegram_user_full: User,
     ) -> None:
         """Test that registering existing user updates their info."""
-        # Register user first
-        await user_service_with_real_db.register_user(telegram_user_full)
+        user_id = 123456789
 
-        # Create updated user with same ID
-        updated_user = User(
-            id=telegram_user_full.id,
-            is_bot=False,
-            first_name="Updated",
-            last_name="Name",
-            username="newusername",
-            language_code="ru",
+        # Register user first
+        await user_service_with_real_db.register_user(
+            user_id=user_id,
+            username="testuser",
+            first_name="Test",
+            last_name="User",
+            language_code="en",
         )
 
-        # Register again - should update
-        result = await user_service_with_real_db.register_user(updated_user)
+        # Register again with updated info - should update
+        result = await user_service_with_real_db.register_user(
+            user_id=user_id,
+            username="newusername",
+            first_name="Updated",
+            last_name="Name",
+            language_code="ru",
+        )
 
         assert result["first_name"] == "Updated"
         assert result["last_name"] == "Name"
@@ -121,18 +100,23 @@ class TestUserService:
     async def test_gets_user_by_id(
         self,
         user_service_with_real_db: UserService,
-        telegram_user_full: User,
     ) -> None:
         """Test retrieving user by ID."""
+        user_id = 123456789
+
         # Register user first
-        await user_service_with_real_db.register_user(telegram_user_full)
+        await user_service_with_real_db.register_user(
+            user_id=user_id,
+            username="testuser",
+            first_name="Test",
+        )
 
         # Get user
-        result = await user_service_with_real_db.get_user(telegram_user_full.id)
+        result = await user_service_with_real_db.get_user(user_id)
 
         assert result is not None
-        assert result["id"] == telegram_user_full.id
-        assert result["username"] == telegram_user_full.username
+        assert result["id"] == user_id
+        assert result["username"] == "testuser"
 
     async def test_gets_user_returns_none_if_not_found(
         self,
@@ -148,14 +132,11 @@ class TestUserService:
         user_service_with_real_db: UserService,
     ) -> None:
         """Test handling users without username."""
-        user = User(
-            id=111222333,
-            is_bot=False,
-            first_name="NoUsername",
+        result = await user_service_with_real_db.register_user(
+            user_id=111222333,
             username=None,
+            first_name="NoUsername",
         )
-
-        result = await user_service_with_real_db.register_user(user)
 
         assert result["username"] is None
         assert result["first_name"] == "NoUsername"
@@ -165,14 +146,12 @@ class TestUserService:
         user_service_with_real_db: UserService,
     ) -> None:
         """Test handling users without last name."""
-        user = User(
-            id=444555666,
-            is_bot=False,
+        result = await user_service_with_real_db.register_user(
+            user_id=444555666,
+            username=None,
             first_name="OnlyFirstName",
             last_name=None,
         )
-
-        result = await user_service_with_real_db.register_user(user)
 
         assert result["last_name"] is None
         assert result["first_name"] == "OnlyFirstName"
@@ -184,13 +163,11 @@ class TestUserService:
         """Test that Telegram user_id is preserved exactly."""
         telegram_id = 123456789
 
-        user = User(
-            id=telegram_id,
-            is_bot=False,
+        result = await user_service_with_real_db.register_user(
+            user_id=telegram_id,
+            username=None,
             first_name="Test",
         )
-
-        result = await user_service_with_real_db.register_user(user)
 
         assert result["id"] == telegram_id
 
@@ -204,13 +181,15 @@ class TestUserService:
         user_service_with_real_db: UserService,
     ) -> None:
         """Test registering multiple different users."""
-        user1 = User(id=111, is_bot=False, first_name="User1")
-        user2 = User(id=222, is_bot=False, first_name="User2")
-        user3 = User(id=333, is_bot=False, first_name="User3")
-
-        result1 = await user_service_with_real_db.register_user(user1)
-        result2 = await user_service_with_real_db.register_user(user2)
-        result3 = await user_service_with_real_db.register_user(user3)
+        result1 = await user_service_with_real_db.register_user(
+            user_id=111, username=None, first_name="User1"
+        )
+        result2 = await user_service_with_real_db.register_user(
+            user_id=222, username=None, first_name="User2"
+        )
+        result3 = await user_service_with_real_db.register_user(
+            user_id=333, username=None, first_name="User3"
+        )
 
         assert result1["id"] == 111
         assert result2["id"] == 222
@@ -228,35 +207,38 @@ class TestUserService:
         user_service_with_real_db: UserService,
     ) -> None:
         """Test updating user language code."""
+        user_id = 123456
+
         # Register with English
-        user = User(
-            id=123456,
-            is_bot=False,
+        await user_service_with_real_db.register_user(
+            user_id=user_id,
+            username=None,
             first_name="Test",
             language_code="en",
         )
 
-        await user_service_with_real_db.register_user(user)
-
         # Update to Russian
-        updated_user = User(
-            id=123456,
-            is_bot=False,
+        result = await user_service_with_real_db.register_user(
+            user_id=user_id,
+            username=None,
             first_name="Test",
             language_code="ru",
         )
-
-        result = await user_service_with_real_db.register_user(updated_user)
 
         assert result["language_code"] == "ru"
 
     async def test_register_creates_timestamps(
         self,
         user_service_with_real_db: UserService,
-        telegram_user_full: User,
     ) -> None:
         """Test that registration creates timestamps."""
-        result = await user_service_with_real_db.register_user(telegram_user_full)
+        result = await user_service_with_real_db.register_user(
+            user_id=123456789,
+            username="testuser",
+            first_name="Test",
+            last_name="User",
+            language_code="en",
+        )
 
         assert "created_at" in result
         assert "updated_at" in result

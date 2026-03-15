@@ -1,9 +1,9 @@
 """Unit tests for TaskRepository optimistic locking functionality."""
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.repositories.task_repository import TaskRepository
-from tests.adapters import DatabasesAdapter
+from core.db.repositories.task_repository import TaskRepository
 
 
 @pytest.mark.unit
@@ -11,9 +11,9 @@ class TestTaskRepositoryOptimisticLocking:
     """Tests for TaskRepository optimistic locking with version field."""
 
     @pytest.fixture
-    def task_repo(self, test_database_adapter: DatabasesAdapter):
+    def task_repo(self, db_session: AsyncSession):
         """Create TaskRepository instance for testing."""
-        return TaskRepository(test_database_adapter)
+        return TaskRepository(db_session)
 
     async def test_update_status_requires_version_parameter(
         self, task_repo: TaskRepository
@@ -45,5 +45,3 @@ class TestTaskRepositoryOptimisticLocking:
         # Verify stuck_timeout_minutes parameter with default value
         assert "stuck_timeout_minutes" in sig.parameters
         assert sig.parameters["stuck_timeout_minutes"].default == 5
-
-

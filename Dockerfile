@@ -12,7 +12,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy project files
 COPY pyproject.toml uv.lock ./
-COPY bot/ ./bot/
+COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 

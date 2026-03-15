@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 from aiogram.types import ChatMember, User
 
-from bot.core.config import Settings
 from bot.services.permission_service import PermissionService
+from core.config import Settings
 
 
 @pytest.mark.unit

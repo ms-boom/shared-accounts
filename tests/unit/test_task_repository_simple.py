@@ -7,7 +7,7 @@ SQLite-compatible tests run with real database transactions.
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.repositories.task_repository import TaskRepository
+from core.db.repositories.task_repository import TaskRepository
 
 
 @pytest.mark.unit

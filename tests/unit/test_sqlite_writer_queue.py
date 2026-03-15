@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from bot.db.database import SQLiteWriterQueue, register_sqlite_pragmas
+from core.db.database import SQLiteWriterQueue, register_sqlite_pragmas
 
 
 class _Base(DeclarativeBase):
@@ -49,6 +49,7 @@ class TestSQLiteWriterQueue:
         await queue.start()
 
         try:
+
             async def write_fn(session: AsyncSession) -> str:
                 return "hello"
 
@@ -65,6 +66,7 @@ class TestSQLiteWriterQueue:
         await queue.start()
 
         try:
+
             async def insert_counter(session: AsyncSession) -> None:
                 session.add(_Counter(id=1, value=42))
 
@@ -87,6 +89,7 @@ class TestSQLiteWriterQueue:
         await queue.start()
 
         try:
+
             async def failing_fn(session: AsyncSession) -> None:
                 raise ValueError("test error")
 
@@ -103,6 +106,7 @@ class TestSQLiteWriterQueue:
         await queue.start()
 
         try:
+
             async def failing_insert(session: AsyncSession) -> None:
                 session.add(_Counter(id=99, value=1))
                 await session.flush()
@@ -146,9 +150,7 @@ class TestSQLiteWriterQueue:
                     .values(value=current + 1)
                 )
 
-            await asyncio.gather(
-                *(queue.execute(increment) for _ in range(10))
-            )
+            await asyncio.gather(*(queue.execute(increment) for _ in range(10)))
 
             # Verify all 10 increments were applied (no lost updates)
             async with session_maker() as session:

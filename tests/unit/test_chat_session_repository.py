@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.repositories.chat_session_repository import ChatSessionRepository
+from core.db.repositories.chat_session_repository import ChatSessionRepository
 
 
 @pytest.mark.integration

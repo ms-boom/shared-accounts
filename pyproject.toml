@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-claude-bot = "bot.cli.__main__:cli"
+claude-bot = "core.cli.__main__:cli"
 
 [dependency-groups]
 dev = [
@@ -30,21 +30,21 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
     "pytest-mock>=3.14.0",
+    "import-linter>=2.1",
 ]
 
-[tool.uv]
-package = false
-
 [build-system]
-requires = ["uv_build>=0.8.11,<0.9.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/core", "src/bot"]
 
 # Ruff configuration
 [tool.ruff]
 target-version = "py312"
 line-length = 88
 exclude = [
-    "alembic/",
     "migrations/",
     ".git",
     "__pycache__",
@@ -75,7 +75,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bot"]  # TODO: Update to your package name
+known-first-party = ["core", "bot"]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 split-on-trailing-comma = true
 combine-as-imports = true
@@ -86,6 +86,7 @@ combine-as-imports = true
 # Mypy configuration
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "src"
 warn_return_any = true
 warn_unused_configs = true
 check_untyped_defs = true
@@ -105,6 +106,7 @@ module = [
     "pydantic.*",
     "pydantic_settings.*",
     "sqlalchemy.*",
+    "alembic.*",
     "click.*",
 ]
 ignore_missing_imports = true
@@ -112,22 +114,29 @@ ignore_missing_imports = true
 # Pytest configuration
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
+    "unit: Unit tests (fast, mocked dependencies)",
+    "integration: Integration tests (with database)",
+    "slow: Slow tests",
+    "requires_db: Requires database connection",
+    "requires_playwright: Requires Playwright browser",
 ]
 addopts = [
     "--strict-markers",
     "--tb=short",
     "--disable-warnings",
+    "--durations=10",
 ]
+log_cli = false
+log_cli_level = "INFO"
 
 [tool.coverage.run]
-source = ["bot"]
+source = ["src/core", "src/bot"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
@@ -138,3 +147,27 @@ omit = [
 precision = 2
 show_missing = true
 skip_covered = false
+
+# Import Linter configuration
+[tool.importlinter]
+root_packages = ["core", "bot"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Core does not depend on Bot"
+type = "independence"
+modules = ["core"]
+
+[[tool.importlinter.contracts]]
+name = "Bot depends on Core (layered architecture)"
+type = "layers"
+layers = [
+    "bot",
+    "core",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core is Telegram-free"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["aiogram"]

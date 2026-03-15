@@ -17,8 +17,7 @@ tests/
 │   ├── __init__.py
 │   ├── environment.py    # Session-scoped event loop
 │   └── database.py       # Database fixtures с транзакциями
-├── conftest.py           # Загрузка модульных фикстур
-└── pytest.ini            # Конфигурация pytest
+└── conftest.py           # Загрузка модульных фикстур
 ```
 
 ### Порядок загрузки (критически важно!)
@@ -116,7 +115,7 @@ async def test_with_sessionmaker(db_sessionmaker):
 
 ```python
 async def test_user_repository(db_session):
-    from bot.db.models import User
+    from core.db.models import User
 
     # Создаем пользователя
     user = User(id=12345, first_name="Test", username="testuser")
@@ -344,8 +343,8 @@ async def test_permission_service():
 
 ```python
 import pytest
-from bot.db.models import User
-from bot.db.repositories import UserRepository
+from core.db.models import User
+from core.db.repositories.user_repository import UserRepository
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -500,6 +499,31 @@ async def clean_cache():
     cache = {}
     yield cache
     cache.clear()  # Очистка после теста
+```
+
+## Import Conventions in Tests
+
+The project uses a `src/` layout with two top-level packages:
+
+- `src/core/` — Telegram-free business logic, domain models, DB repositories
+- `src/bot/` — Telegram adapter layer (handlers, services, adapters)
+
+**Convention:**
+
+- Tests for `src/core/` code use `from core.*` imports.
+- Tests for `src/bot/` code use `from bot.*` imports.
+- Both are available because the project is installed in editable mode (`uv sync`).
+
+```python
+# Tests for core layer
+from core.db.models import User
+from core.db.repositories.user_repository import UserRepository
+from core.services.session_management_service import SessionManagementService
+
+# Tests for bot layer
+from bot.services.permission_service import PermissionService
+from bot.handlers.claude_auth import get_thread_id
+from bot.adapters.telegram_notifier import TelegramNotifier
 ```
 
 ### 5. Используйте parametrize для множественных случаев
