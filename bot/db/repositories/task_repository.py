@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
@@ -212,12 +213,11 @@ class TaskRepository:
             await self.session.flush()
             logger.info(f"Dequeued task {task.id} for processing")
             return _row_to_dict(task)
+        except OperationalError as e:
+            # SQLite busy_timeout exhausted or PostgreSQL lock contention
+            logger.debug(f"OperationalError dequeuing task (likely lock contention): {e}")
+            return None
         except Exception as e:
-            # SQLite may raise OperationalError if row is locked
-            # In this case, just return None (task was taken by another worker)
-            if "locked" in str(e).lower():
-                logger.debug("Task is locked by another worker, skipping")
-                return None
             logger.error(f"Failed to dequeue pending task: {e}")
             raise DatabaseError(f"Failed to dequeue pending task: {e}") from e
 

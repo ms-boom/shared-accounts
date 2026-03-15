@@ -5,13 +5,13 @@ Pattern from statements/ - repository accepts session, doesn't manage transactio
 
 import logging
 from datetime import datetime
-from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.exceptions import DatabaseError
 from bot.db.models import ChatSession
+from bot.db.upsert import build_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -195,24 +195,21 @@ class ChatSessionRepository:
             DatabaseError: If database operation fails
         """
         try:
-            # PostgreSQL INSERT ... ON CONFLICT
-            insert_stmt = sa.dialects.postgresql.insert(ChatSession).values(
-                chat_id=chat_id,
-                thread_id=thread_id,
-                email=email,
-                session_path=session_path,
-                created_at=datetime.utcnow(),
-            )
-
-            # ON CONFLICT ... DO UPDATE
-            # SQLAlchemy stubs have incomplete types for on_conflict_do_update
-            # We use Any here as the method returns proper Insert type at runtime
-            stmt: Any = insert_stmt.on_conflict_do_update(
-                index_elements=["chat_id", "thread_id"],
-                set_={
-                    "email": insert_stmt.excluded.email,
-                    "session_path": insert_stmt.excluded.session_path,
+            stmt = build_upsert(
+                ChatSession,
+                values={
+                    "chat_id": chat_id,
+                    "thread_id": thread_id,
+                    "email": email,
+                    "session_path": session_path,
+                    "created_at": datetime.utcnow(),
                 },
+                conflict_columns=["chat_id", "thread_id"],
+                update_columns={
+                    "email": email,
+                    "session_path": session_path,
+                },
+                session=self.session,
             ).returning(ChatSession)
 
             result = await self.session.execute(stmt)

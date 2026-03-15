@@ -17,16 +17,26 @@ Usage in repositories (session injection):
             await self.session.flush()  # No commit in repository!
 """
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 import sqlalchemy as sa
 import sqlalchemy.ext.asyncio
 import sqlalchemy.orm
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from bot.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 # Global Session factory - configured once, reused everywhere
 # Pattern from statements/db.py
@@ -34,6 +44,129 @@ Session = sa.orm.sessionmaker(
     expire_on_commit=False,  # Prevent attributes from being expired after commit
     class_=sa.ext.asyncio.AsyncSession,
 )
+
+
+def _apply_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
+    """Apply required SQLite PRAGMAs to every new DBAPI connection.
+
+    Called by SQLAlchemy's sync engine 'connect' event for each new connection.
+    Must execute via cursor, not via SQLAlchemy ORM, because the event fires
+    before the connection is handed to the pool.
+
+    Args:
+        dbapi_connection: Raw sqlite3.Connection from aiosqlite
+        connection_record: SQLAlchemy connection record (unused)
+    """
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA cache_size=-64000")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+def register_sqlite_pragmas(engine: AsyncEngine) -> None:
+    """Register SQLite PRAGMA event listener on the given engine.
+
+    Attaches `_apply_sqlite_pragmas` to the sync engine's 'connect' event
+    so that every new DBAPI connection receives the required PRAGMAs.
+
+    Called from `setup()` for SQLite engines and exported for use by test fixtures.
+
+    Args:
+        engine: AsyncEngine backed by SQLite (must be SQLite)
+    """
+    sa.event.listen(engine.sync_engine, "connect", _apply_sqlite_pragmas)
+
+
+class SQLiteWriterQueue:
+    """Serializes SQLite write operations through asyncio.Queue.
+
+    Required for SQLite because concurrent writers cause 'database is locked'
+    even with busy_timeout. The queue ensures writes execute one at a time
+    within the same process.
+
+    Only instantiated for SQLite. PostgreSQL uses direct session access.
+    """
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]) -> None:
+        """
+        Args:
+            session_maker: SQLAlchemy async session factory
+        """
+        self._session_maker = session_maker
+        self._queue: asyncio.Queue[tuple[asyncio.Future[Any], Callable[[AsyncSession], Awaitable[Any]]] | None] = asyncio.Queue()
+        self._stopped = False
+        self._task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        """Start the background writer task.
+
+        Must be called once before any execute() calls.
+        Typically called from Database.startup().
+        """
+        self._task = asyncio.create_task(self._writer_loop())
+        logger.info("SQLiteWriterQueue started")
+
+    async def stop(self) -> None:
+        """Graceful shutdown: drain pending writes, then stop.
+
+        Sends sentinel to queue, waits up to 10 seconds for background
+        task to finish. Cancels the task on timeout.
+        """
+        self._stopped = True
+        await self._queue.put(None)  # sentinel to stop the loop
+        if self._task is not None:
+            try:
+                await asyncio.wait_for(self._task, timeout=10.0)
+            except TimeoutError:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+        logger.info("SQLiteWriterQueue stopped")
+
+    async def execute(self, fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
+        """Submit a write operation to the serialized queue.
+
+        Args:
+            fn: Async callable that receives an AsyncSession and returns a result.
+                The session is already within an open transaction when fn is called.
+                fn must NOT call session.commit() — the queue handles commit.
+                fn must NOT call session.close() — the queue handles cleanup.
+
+        Returns:
+            The return value of fn.
+
+        Raises:
+            RuntimeError: If called after stop().
+            Any exception raised by fn — propagated via asyncio.Future.
+        """
+        if self._stopped:
+            raise RuntimeError("SQLiteWriterQueue is stopped")
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[T] = loop.create_future()
+        await self._queue.put((future, fn))
+        return await future
+
+    async def _writer_loop(self) -> None:
+        """Background task: pull items from queue and execute them serially."""
+        while True:
+            item = await self._queue.get()
+            if item is None:
+                break
+            future, fn = item
+            try:
+                async with self._session_maker() as session:
+                    async with session.begin():
+                        result = await fn(session)
+                future.set_result(result)
+            except Exception as exc:
+                if not future.done():
+                    future.set_exception(exc)
 
 
 async def setup(settings: Settings) -> AsyncEngine:
@@ -99,6 +232,10 @@ async def setup(settings: Settings) -> AsyncEngine:
         connect_args=connect_args,
     )
 
+    # Register SQLite PRAGMAs before the engine is used
+    if is_sqlite:
+        register_sqlite_pragmas(engine)
+
     # Configure global Session with engine
     Session.configure(bind=engine)
     logger.info(
@@ -132,6 +269,7 @@ class Database:
         """
         self.settings = settings
         self._engine: AsyncEngine | None = None
+        self.writer_queue: SQLiteWriterQueue | None = None  # None for PostgreSQL
 
     @property
     def session_maker(self) -> sa.orm.sessionmaker:
@@ -143,11 +281,24 @@ class Database:
         return Session
 
     async def startup(self) -> None:
-        """Initialize database engine and configure global Session."""
+        """Initialize database engine and configure global Session.
+
+        For SQLite databases, also creates and starts the writer queue to
+        serialize concurrent write operations within the same process.
+        """
         self._engine = await setup(self.settings)
+        if self.settings.DATABASE_URL.lower().startswith("sqlite"):
+            self.writer_queue = SQLiteWriterQueue(self.session_maker)  # type: ignore[arg-type]
+            await self.writer_queue.start()
 
     async def shutdown(self) -> None:
-        """Dispose database engine and cleanup resources."""
+        """Dispose database engine and cleanup resources.
+
+        For SQLite, gracefully drains the writer queue before disposing the engine.
+        """
+        if self.writer_queue is not None:
+            await self.writer_queue.stop()
+            self.writer_queue = None
         await dispose()
         self._engine = None
 

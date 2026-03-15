@@ -12,7 +12,7 @@ from bot.core.config import get_settings
 from bot.core.container import create_container
 from bot.core.logging_config import setup_logging
 from bot.db.database import Database
-from bot.db.fsm_storage import PostgreSQLStorage
+from bot.db.fsm_storage import BotFSMStorage
 from bot.handlers import claude_auth, common, group_admin, group_events
 from bot.middleware.error_handler import ErrorHandlerMiddleware
 from bot.middleware.group_tracker import GroupTrackerMiddleware
@@ -93,10 +93,9 @@ async def main() -> None:
     # Startup database (must be done before creating FSM storage)
     await on_startup(bot, database, settings.DEBUG)
 
-    # Use PostgreSQL storage for FSM (persistent state across bot restarts)
-    if not database.session_maker:
-        raise RuntimeError("Database session_maker not initialized")
-    storage = PostgreSQLStorage(database.session_maker)
+    # Use BotFSMStorage for FSM (persistent state across bot restarts)
+    # writer_queue is None for PostgreSQL, set for SQLite — BotFSMStorage handles both
+    storage = BotFSMStorage(database.session_maker, writer_queue=database.writer_queue)
     dp = Dispatcher(storage=storage)
 
     # Register middleware

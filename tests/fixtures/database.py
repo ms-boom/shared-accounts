@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 import bot.db.database as db  # Import production database module
+from bot.db.database import register_sqlite_pragmas
 from bot.core.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,9 @@ async def db_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None
         pool_pre_ping=False,
         connect_args=connect_args,
     )
+
+    if is_sqlite:
+        register_sqlite_pragmas(engine)
 
     # Create tables for SQLite (in-memory DB needs schema)
     if is_sqlite:

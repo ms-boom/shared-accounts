@@ -1,4 +1,4 @@
-"""PostgreSQL-based FSM storage for aiogram."""
+"""Dialect-aware FSM storage for aiogram."""
 
 from collections.abc import Mapping
 from typing import Any, cast
@@ -6,37 +6,82 @@ from typing import Any, cast
 from aiogram.fsm.state import State
 from aiogram.fsm.storage.base import BaseStorage, StateType, StorageKey
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.db.database import SQLiteWriterQueue
 from bot.db.models import FSMState
+from bot.db.upsert import build_upsert
+
+_CONFLICT_COLUMNS = ["chat_id", "user_id", "thread_id"]
 
 
-class PostgreSQLStorage(BaseStorage):
-    """
-    PostgreSQL-based FSM storage implementation for aiogram.
+class BotFSMStorage(BaseStorage):
+    """Dialect-aware FSM storage for aiogram.
 
-    Provides persistent storage for conversation states using PostgreSQL.
-    Thread-safe and supports concurrent access from multiple bot instances.
+    Supports both PostgreSQL and SQLite backends. For SQLite, routes write
+    operations through SQLiteWriterQueue to prevent concurrent write conflicts.
 
     Attributes:
-        session_maker: SQLAlchemy async session maker
+        session_maker: SQLAlchemy async session factory
+        writer_queue: Optional queue for serializing SQLite writes
     """
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+        writer_queue: SQLiteWriterQueue | None = None,
+    ) -> None:
         """
-        Initialize PostgreSQL storage.
+        Initialize FSM storage.
 
         Args:
-            session_maker: SQLAlchemy async session maker
+            session_maker: SQLAlchemy async session factory
+            writer_queue: Writer queue for SQLite serialization. None for PostgreSQL.
         """
         self.session_maker = session_maker
+        self.writer_queue = writer_queue
 
-    async def set_state(
-        self,
-        key: StorageKey,
-        state: StateType = None,
+    # --- Private write helpers (called with an already-open session) ---
+
+    async def _write_state(
+        self, session: AsyncSession, key: StorageKey, state_name: str | None
     ) -> None:
+        """Execute upsert for state column only."""
+        stmt = build_upsert(
+            FSMState,
+            values={
+                "chat_id": key.chat_id,
+                "user_id": key.user_id,
+                "thread_id": key.thread_id or 0,
+                "state": state_name,
+            },
+            conflict_columns=_CONFLICT_COLUMNS,
+            update_columns={"state": state_name},
+            session=session,
+        )
+        await session.execute(stmt)
+
+    async def _write_data(
+        self, session: AsyncSession, key: StorageKey, data_dict: dict[str, Any]
+    ) -> None:
+        """Execute upsert for data column only."""
+        stmt = build_upsert(
+            FSMState,
+            values={
+                "chat_id": key.chat_id,
+                "user_id": key.user_id,
+                "thread_id": key.thread_id or 0,
+                "data": data_dict,
+            },
+            conflict_columns=_CONFLICT_COLUMNS,
+            update_columns={"data": data_dict},
+            session=session,
+        )
+        await session.execute(stmt)
+
+    # --- Public write methods ---
+
+    async def set_state(self, key: StorageKey, state: StateType = None) -> None:
         """
         Set state for user in chat.
 
@@ -46,22 +91,70 @@ class PostgreSQLStorage(BaseStorage):
         """
         state_name = state.state if isinstance(state, State) else state
 
-        async with self.session_maker() as session:
-            stmt = (
-                insert(FSMState)
-                .values(
-                    chat_id=key.chat_id,
-                    user_id=key.user_id,
-                    thread_id=key.thread_id or 0,
-                    state=state_name,
-                )
-                .on_conflict_do_update(
-                    index_elements=["chat_id", "user_id", "thread_id"],
-                    set_={"state": state_name},
-                )
+        if self.writer_queue is not None:
+            await self.writer_queue.execute(
+                lambda s: self._write_state(s, key, state_name)
             )
-            await session.execute(stmt)
-            await session.commit()
+        else:
+            async with self.session_maker() as session:
+                await self._write_state(session, key, state_name)
+                await session.commit()
+
+    async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
+        """
+        Set data for user in chat.
+
+        Args:
+            key: Storage key (bot_id, chat_id, user_id, thread_id)
+            data: Data to store
+        """
+        data_dict = dict(data)
+
+        if self.writer_queue is not None:
+            await self.writer_queue.execute(
+                lambda s: self._write_data(s, key, data_dict)
+            )
+        else:
+            async with self.session_maker() as session:
+                await self._write_data(session, key, data_dict)
+                await session.commit()
+
+    async def update_data(
+        self, key: StorageKey, data: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Update data for user in chat (merge with existing).
+
+        Args:
+            key: Storage key (bot_id, chat_id, user_id, thread_id)
+            data: Data to merge
+
+        Returns:
+            Updated data
+        """
+        async with self.session_maker() as session:
+            select_stmt = select(FSMState.data).where(
+                FSMState.chat_id == key.chat_id,
+                FSMState.user_id == key.user_id,
+                FSMState.thread_id == (key.thread_id or 0),
+            )
+            result = await session.execute(select_stmt)
+            existing_data: dict[str, Any] = result.scalar_one_or_none() or {}
+
+        merged_data = {**existing_data, **data}
+
+        if self.writer_queue is not None:
+            await self.writer_queue.execute(
+                lambda s: self._write_data(s, key, merged_data)
+            )
+        else:
+            async with self.session_maker() as session:
+                await self._write_data(session, key, merged_data)
+                await session.commit()
+
+        return merged_data
+
+    # --- Read methods (bypass queue — WAL allows concurrent reads) ---
 
     async def get_state(self, key: StorageKey) -> str | None:
         """
@@ -81,34 +174,7 @@ class PostgreSQLStorage(BaseStorage):
             )
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()
-            # SQLAlchemy returns Any from scalar_one_or_none, but we know it's str | None
             return cast(str | None, row)
-
-    async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
-        """
-        Set data for user in chat.
-
-        Args:
-            key: Storage key (bot_id, chat_id, user_id, thread_id)
-            data: Data to store
-        """
-        data_dict = dict(data)  # Convert Mapping to dict for JSONB storage
-        async with self.session_maker() as session:
-            stmt = (
-                insert(FSMState)
-                .values(
-                    chat_id=key.chat_id,
-                    user_id=key.user_id,
-                    thread_id=key.thread_id or 0,
-                    data=data_dict,
-                )
-                .on_conflict_do_update(
-                    index_elements=["chat_id", "user_id", "thread_id"],
-                    set_={"data": data_dict},
-                )
-            )
-            await session.execute(stmt)
-            await session.commit()
 
     async def get_data(self, key: StorageKey) -> dict[str, Any]:
         """
@@ -130,52 +196,6 @@ class PostgreSQLStorage(BaseStorage):
             row = result.scalar_one_or_none()
             return row if row is not None else {}
 
-    async def update_data(
-        self, key: StorageKey, data: Mapping[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Update data for user in chat (merge with existing).
-
-        Args:
-            key: Storage key (bot_id, chat_id, user_id, thread_id)
-            data: Data to merge
-
-        Returns:
-            Updated data
-        """
-        async with self.session_maker() as session:
-            # Get existing data
-            select_stmt = select(FSMState.data).where(
-                FSMState.chat_id == key.chat_id,
-                FSMState.user_id == key.user_id,
-                FSMState.thread_id == (key.thread_id or 0),
-            )
-            result = await session.execute(select_stmt)
-            existing_data = result.scalar_one_or_none() or {}
-
-            # Merge with new data
-            updated_data = {**existing_data, **data}
-
-            # Update in database
-            insert_stmt = (
-                insert(FSMState)
-                .values(
-                    chat_id=key.chat_id,
-                    user_id=key.user_id,
-                    thread_id=key.thread_id or 0,
-                    data=updated_data,
-                )
-                .on_conflict_do_update(
-                    index_elements=["chat_id", "user_id", "thread_id"],
-                    set_={"data": updated_data},
-                )
-            )
-            await session.execute(insert_stmt)
-            await session.commit()
-
-            return updated_data
-
     async def close(self) -> None:
         """Close storage (cleanup resources)."""
-        # Session maker doesn't need explicit closing
         pass
