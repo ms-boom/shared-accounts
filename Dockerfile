@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies (including Playwright browser requirements)
+# Install system dependencies (browser libs + xvfb for headed mode)
 RUN apt-get update && apt-get install -y \
     git \
     wget \
@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for dependency management
@@ -36,9 +37,9 @@ COPY alembic.ini ./
 # Install dependencies
 RUN uv sync --frozen
 
-# Install Playwright browsers
-RUN uv run playwright install chromium
-RUN uv run playwright install-deps
+# Install Patchright browser (Chrome for better stealth)
+RUN uv run patchright install chrome
+RUN uv run patchright install-deps
 
 # Create data directories
 RUN mkdir -p /data/sessions /data/logs /data/errors && \

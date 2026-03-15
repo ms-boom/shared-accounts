@@ -1,10 +1,9 @@
-"""Playwright automation service for Claude.ai interactions."""
+"""Patchright automation service for Claude.ai interactions."""
 
 import logging
 from pathlib import Path
 
-from playwright.async_api import (
-    Browser,
+from patchright.async_api import (
     Playwright,
     async_playwright,
 )
@@ -18,34 +17,33 @@ logger = logging.getLogger(__name__)
 
 class PlaywrightService:
     """
-    Service for automating Claude.ai interactions with Playwright.
+    Service for automating Claude.ai interactions with Patchright.
 
     Manages browser sessions, handles authentication, and extracts authorization codes.
     This service is a wrapper around SessionManagementService that provides
     chat_id/thread_id based session management for Telegram bot integration.
+
+    Uses Patchright (patched Playwright) with persistent browser contexts
+    to bypass Cloudflare Turnstile bot detection.
     """
 
     def __init__(self, settings: Settings):
         """
-        Initialize Playwright service.
+        Initialize Patchright service.
 
         Args:
             settings: Application settings
         """
         self.settings = settings
         self.playwright: Playwright | None = None
-        self.browser: Browser | None = None
         self._session_service: SessionManagementService | None = None
 
     async def start(self) -> None:
-        """Start Playwright and browser."""
+        """Start Patchright."""
         try:
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.settings.PLAYWRIGHT_HEADLESS,
-            )
             self._session_service = SessionManagementService(
-                self.settings, self.browser
+                self.settings, self.playwright
             )
             logger.info("Playwright browser started")
         except Exception as e:
@@ -53,10 +51,8 @@ class PlaywrightService:
             raise BrowserError(f"Failed to start browser: {e}") from e
 
     async def stop(self) -> None:
-        """Stop Playwright and browser."""
+        """Stop Patchright."""
         try:
-            if self.browser:
-                await self.browser.close()
             if self.playwright:
                 await self.playwright.stop()
             logger.info("Playwright browser stopped")

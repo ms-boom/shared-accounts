@@ -1,12 +1,12 @@
-"""Session management service for Claude sessions."""
+"""Session management service for Claude sessions using Patchright."""
 
 import logging
 from pathlib import Path
 
-from playwright.async_api import (
-    Browser,
+from patchright.async_api import (
     BrowserContext,
     Page,
+    Playwright,
     TimeoutError as PlaywrightTimeoutError,
 )
 
@@ -21,90 +21,139 @@ class SessionManagementService:
     Service for managing Claude sessions.
 
     Provides session initialization, login processing, and code extraction
-    using Playwright browser automation. Works with session paths directly.
+    using Patchright browser automation with persistent contexts.
+    Persistent contexts store cookies/state in user_data_dir automatically,
+    which also helps bypass Cloudflare Turnstile detection.
     """
 
-    def __init__(self, settings: Settings, browser: Browser):
-        """
-        Initialize session management service.
-
-        Args:
-            settings: Application settings
-            browser: Playwright browser instance
-        """
+    def __init__(self, settings: Settings, playwright: Playwright):
         self.settings = settings
-        self.browser = browser
+        self.playwright = playwright
+
+    async def _create_persistent_context(
+        self, session_path: Path
+    ) -> BrowserContext:
+        """
+        Create a persistent browser context for the given session path.
+
+        Persistent context stores all cookies, localStorage, and browser state
+        in user_data_dir. This avoids manual storage_state management and
+        presents a consistent browser fingerprint to Cloudflare.
+        """
+        session_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        return await self.playwright.chromium.launch_persistent_context(
+            user_data_dir=str(session_path),
+            channel="chrome",
+            headless=False,
+            no_viewport=True,
+            args=["--window-size=1920,1080"],
+            ignore_default_args=["--enable-automation"],
+        )
+
+    async def _save_debug(
+        self, page: Page, session_path: Path, step_name: str
+    ) -> None:
+        """Save screenshot and HTML for debugging."""
+        debug_dir = session_path / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            await page.screenshot(
+                path=str(debug_dir / f"{step_name}.png"),
+                full_page=True,
+            )
+            html = await page.content()
+            (debug_dir / f"{step_name}.html").write_text(html, encoding="utf-8")
+            logger.debug(f"Saved debug snapshot: {step_name}")
+        except Exception as e:
+            logger.warning(f"Failed to save debug snapshot {step_name}: {e}")
+
+    async def _dismiss_cookie_popup(self, page: Page) -> None:
+        """Dismiss cookie consent popup if present."""
+        try:
+            reject_btn = page.locator(
+                'button:has-text("Reject All Cookies"), '
+                'button:has-text("Accept All Cookies")'
+            ).first
+            await reject_btn.click(timeout=3000)
+            logger.info("Dismissed cookie popup")
+        except PlaywrightTimeoutError:
+            pass
 
     async def initialize_session(self, session_path: Path, email: str) -> str:
         """
         Initialize Claude session at specific path.
 
-        Opens login page, fills email, requests login link.
-
-        Args:
-            session_path: Path to store session data
-            email: Email address for Claude account
-
-        Returns:
-            Success message
-
-        Raises:
-            BrowserError: If browser operation fails
+        Opens login page, fills email, submits. Waits for either
+        verification code input or "Check your email" confirmation.
         """
-        session_path.mkdir(parents=True, exist_ok=True, mode=0o700)
-
         context: BrowserContext | None = None
         page: Page | None = None
 
         try:
-            context = await self.browser.new_context(
-                storage_state=None,
-                viewport={"width": 1280, "height": 720},
-            )
+            context = await self._create_persistent_context(session_path)
+            page = context.pages[0] if context.pages else await context.new_page()
 
-            page = await context.new_page()
-
-            # Navigate to Claude login page
             await page.goto(
                 "https://claude.ai/login",
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
             )
             logger.info(f"Opened login page for session {session_path}")
+            await self._save_debug(page, session_path, "01_login_page")
 
-            # Fill email field
+            await self._dismiss_cookie_popup(page)
+
             email_input = page.locator('input[type="email"]')
             await email_input.fill(email)
             logger.info(f"Filled email for session {session_path}")
 
-            # Click "Continue with email" button
-            continue_button = page.locator('button:has-text("Continue with email")')
-            await continue_button.click()
-
-            # Wait for "Check your email" message
-            await page.wait_for_selector(
-                'text="Check your email"',
-                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+            continue_button = page.locator(
+                'button:has-text("Continue with email")'
             )
+            await continue_button.click()
+            await self._save_debug(page, session_path, "02_after_submit")
+
+            # Claude shows either verification code input or "Check your email"
+            try:
+                await page.wait_for_selector(
+                    'input[name="code"], '
+                    'input[placeholder*="verification"], '
+                    'input[placeholder*="code"], '
+                    'text=/[Cc]heck your email|[Ee]mail sent|'
+                    '[Vv]erification code|[Vv]erify/',
+                    timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                )
+            except PlaywrightTimeoutError:
+                await self._save_debug(page, session_path, "02_timeout")
+                raise
+
+            await self._save_debug(page, session_path, "03_after_wait")
             logger.info(f"Email sent confirmation for session {session_path}")
 
-            # Save session state
-            await context.storage_state(path=str(session_path / "state.json"))
-
             return (
-                "📧 Email sent! Please send me the authorization link from your inbox."
+                "📧 Email sent! Please send me the authorization link "
+                "from your inbox."
             )
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout during session init for {session_path}: {e}")
+            logger.error(
+                f"Timeout during session init for {session_path}: {e}"
+            )
             if page:
-                screenshot_path = session_path / "error_init.png"
-                await page.screenshot(path=str(screenshot_path))
+                await self._save_debug(page, session_path, "error_init")
             raise BrowserError(
                 "❌ Operation timed out. The page took too long to respond."
             ) from e
         except Exception as e:
-            logger.error(f"Failed to initialize session at {session_path}: {e}")
-            raise BrowserError(f"❌ Failed to initialize session: {str(e)}") from e
+            logger.error(
+                f"Failed to initialize session at {session_path}: {e}"
+            )
+            if page:
+                await self._save_debug(page, session_path, "error_init")
+            raise BrowserError(
+                f"❌ Failed to initialize session: {str(e)}"
+            ) from e
         finally:
             if context:
                 await context.close()
@@ -113,60 +162,65 @@ class SessionManagementService:
         """
         Process Claude login link to complete authentication.
 
-        Args:
-            session_path: Path to session directory
-            login_url: Login URL from email
-
-        Returns:
-            Success message
-
-        Raises:
-            SessionError: If session doesn't exist
-            BrowserError: If browser operation fails
+        Opens the magic link URL in persistent context to authenticate.
         """
-        state_file = session_path / "state.json"
-        if not state_file.exists():
+        if not session_path.exists():
             raise SessionError(
-                f"❌ No session found at {session_path}. Run init-session first."
+                f"❌ No session found at {session_path}. "
+                "Run init-session first."
             )
 
         context: BrowserContext | None = None
         page: Page | None = None
 
         try:
-            context = await self.browser.new_context(
-                storage_state=str(state_file),
+            context = await self._create_persistent_context(session_path)
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            await page.goto(
+                login_url, timeout=self.settings.PLAYWRIGHT_TIMEOUT
             )
+            await self._save_debug(page, session_path, "04_magic_link")
 
-            page = await context.new_page()
+            await self._dismiss_cookie_popup(page)
 
-            # Open login link
-            await page.goto(login_url, timeout=self.settings.PLAYWRIGHT_TIMEOUT)
-
-            # Wait for successful authentication
+            # Wait for authenticated state — user menu or chat interface
             await page.wait_for_selector(
-                'button[aria-label="User menu"], [data-testid="user-menu"]',
+                'button[aria-label="User menu"], '
+                '[data-testid="user-menu"], '
+                'text=/[Nn]ew [Cc]hat|[Ss]tart a|[Cc]laude/',
                 timeout=self.settings.PLAYWRIGHT_TIMEOUT,
                 state="visible",
             )
-            logger.info(f"Authentication successful for session {session_path}")
+            await self._save_debug(page, session_path, "05_authenticated")
+            logger.info(
+                f"Authentication successful for session {session_path}"
+            )
 
-            # Save authenticated session
-            await context.storage_state(path=str(state_file))
-
-            return "✅ Session initialized successfully! You can now use /get_code."
+            return (
+                "✅ Session initialized successfully! "
+                "You can now use /get_code."
+            )
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout during login for {session_path}: {e}")
+            logger.error(
+                f"Timeout during login for {session_path}: {e}"
+            )
             if page:
-                screenshot_path = session_path / "error_login.png"
-                await page.screenshot(path=str(screenshot_path))
+                await self._save_debug(page, session_path, "error_login")
             raise BrowserError(
-                "❌ Login link is invalid or expired. Please run init-session again."
+                "❌ Login link is invalid or expired. "
+                "Please run init-session again."
             ) from e
         except Exception as e:
-            logger.error(f"Failed to process login link for {session_path}: {e}")
-            raise BrowserError(f"❌ Failed to process login link: {str(e)}") from e
+            logger.error(
+                f"Failed to process login link for {session_path}: {e}"
+            )
+            if page:
+                await self._save_debug(page, session_path, "error_login")
+            raise BrowserError(
+                f"❌ Failed to process login link: {str(e)}"
+            ) from e
         finally:
             if context:
                 await context.close()
@@ -174,38 +228,27 @@ class SessionManagementService:
     async def extract_code(self, session_path: Path, auth_url: str) -> str:
         """
         Extract authorization code from Claude authorization page.
-
-        Args:
-            session_path: Path to session directory
-            auth_url: Authorization URL from Claude Code
-
-        Returns:
-            Authorization code
-
-        Raises:
-            SessionError: If session doesn't exist or is invalid
-            BrowserError: If code extraction fails
         """
-        state_file = session_path / "state.json"
-        if not state_file.exists():
+        if not session_path.exists():
             raise SessionError(
-                f"❌ No active session found at {session_path}. Run init-session first."
+                f"❌ No active session found at {session_path}. "
+                "Run init-session first."
             )
 
         context: BrowserContext | None = None
         page: Page | None = None
 
         try:
-            context = await self.browser.new_context(
-                storage_state=str(state_file),
+            context = await self._create_persistent_context(session_path)
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            await page.goto(
+                auth_url, timeout=self.settings.PLAYWRIGHT_TIMEOUT
             )
+            await self._save_debug(page, session_path, "06_auth_page")
 
-            page = await context.new_page()
+            await self._dismiss_cookie_popup(page)
 
-            # Navigate to authorization URL
-            await page.goto(auth_url, timeout=self.settings.PLAYWRIGHT_TIMEOUT)
-
-            # Wait for authorization code element
             code_element = None
             selectors = [
                 "code",
@@ -227,20 +270,24 @@ class SessionManagementService:
                     continue
 
             if not code_element:
-                # Try to find any code-like text
                 await page.wait_for_load_state("networkidle")
+                await self._save_debug(page, session_path, "06_no_code_found")
+
                 code_text = await page.locator(
                     "text=/^[A-Z0-9]{8,}$/"
                 ).first.text_content()
 
                 if code_text:
-                    logger.info(f"Extracted code for session {session_path}")
-                    assert isinstance(code_text, str)  # guarded by if code_text above
+                    logger.info(
+                        f"Extracted code for session {session_path}"
+                    )
+                    assert isinstance(code_text, str)
                     return code_text.strip()
                 else:
-                    raise BrowserError("Could not find authorization code on page")
+                    raise BrowserError(
+                        "Could not find authorization code on page"
+                    )
 
-            # Extract code text
             code = await code_element.text_content()
             if not code:
                 code = await code_element.get_attribute("value")
@@ -249,28 +296,36 @@ class SessionManagementService:
                 raise BrowserError("Authorization code element is empty")
 
             logger.info(f"Extracted code for session {session_path}")
-            assert isinstance(code, str)  # guarded by if not code checks above
+            assert isinstance(code, str)
             return code.strip()
 
         except PlaywrightTimeoutError as e:
-            logger.error(f"Timeout extracting code for {session_path}: {e}")
+            logger.error(
+                f"Timeout extracting code for {session_path}: {e}"
+            )
             if page:
-                screenshot_path = session_path / "error_extract.png"
-                await page.screenshot(path=str(screenshot_path))
+                await self._save_debug(page, session_path, "error_extract")
             raise BrowserError(
-                "❌ Operation timed out. Could not extract authorization code."
+                "❌ Operation timed out. "
+                "Could not extract authorization code."
             ) from e
         except SessionError:
             raise
         except Exception as e:
-            logger.error(f"Failed to extract code for {session_path}: {e}")
+            logger.error(
+                f"Failed to extract code for {session_path}: {e}"
+            )
+            if page:
+                await self._save_debug(page, session_path, "error_extract")
 
-            # Check if session is invalid
-            if "401" in str(e) or "403" in str(e) or "unauthorized" in str(e).lower():
-                if state_file.exists():
-                    state_file.unlink()
+            if (
+                "401" in str(e)
+                or "403" in str(e)
+                or "unauthorized" in str(e).lower()
+            ):
                 raise SessionError(
-                    f"❌ Session expired or invalid at {session_path}. Please run init-session again."
+                    f"❌ Session expired or invalid at {session_path}. "
+                    "Please run init-session again."
                 ) from e
 
             raise BrowserError(

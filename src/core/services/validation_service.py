@@ -10,7 +10,9 @@ class ValidationService:
     EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
     # Claude URL patterns
-    CLAUDE_LOGIN_URL_PATTERN = re.compile(r"https://claude\.ai/login\?token=.+")
+    CLAUDE_LOGIN_URL_PATTERN = re.compile(
+        r"https://claude\.ai/(login\?token=|magic-link[#?]).+"
+    )
     CLAUDE_AUTH_URL_PATTERN = re.compile(
         r"https://claude\.ai/(auth/authorize|login/authorize)\?.+"
     )

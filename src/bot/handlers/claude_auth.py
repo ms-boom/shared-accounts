@@ -313,10 +313,11 @@ async def handle_claude_url(
             message.chat.id, limit=5, thread_id=thread_id
         )
 
-    # Find recent init_session task that's processing
+    # Find recent init_session task (done = email sent, pending/processing = in progress)
     init_task = None
     for task in recent_tasks:
         if task["task_type"] == "init_session" and task["status"] in [
+            "done",
             "pending",
             "processing",
         ]:
