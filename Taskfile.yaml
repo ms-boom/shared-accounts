@@ -18,8 +18,8 @@ tasks:
   format:
     desc: Format code with ruff
     cmds:
-      - ruff check --fix {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
-      - ruff format {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+      - uv run ruff check --fix {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+      - uv run ruff format {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
 
   lint:
     desc: Run all linting tools
@@ -31,53 +31,53 @@ tasks:
   lint:ruff:
     desc: Run ruff linter and formatter checks
     cmds:
-      - ruff check {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
-      - ruff format --check {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+      - uv run ruff check {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
+      - uv run ruff format --check {{.PYTHON_SOURCE}} {{.TEST_SOURCE}}
 
   lint:mypy:
     desc: Run type checking with mypy
     cmds:
-      - mypy src/core src/bot
+      - uv run mypy src/core src/bot
 
   lint:imports:
     desc: Check import boundaries between layers
     cmds:
-      - lint-imports
+      - uv run lint-imports
 
   test:
     desc: Run tests with pytest
     cmds:
-      - pytest {{.CLI_ARGS}}
+      - uv run pytest {{.CLI_ARGS}}
 
   test:unit:
     desc: Run unit tests only
     cmds:
-      - pytest -m unit
+      - uv run pytest -m unit
 
   test:integration:
     desc: Run integration tests only
     cmds:
-      - pytest -m integration
+      - uv run pytest -m integration
 
   coverage:
     desc: Run tests with coverage report
     cmds:
-      - pytest --cov=src/core --cov=src/bot --cov-report=html --cov-report=term-missing
+      - uv run pytest --cov=src/core --cov=src/bot --cov-report=html --cov-report=term-missing
 
   prek:install:
     desc: Install pre-commit hooks
     cmds:
-      - prek install
+      - uv run prek install
 
   prek:
     desc: Run pre-commit hooks manually
     cmds:
-      - prek run --all-files
+      - uv run prek run --all-files
 
   prek:update:
     desc: Update pre-commit hooks to latest versions
     cmds:
-      - prek autoupdate
+      - uv run prek autoupdate
 
   qa:
     desc: Full quality assurance (format + lint + lint:imports + coverage)
@@ -103,38 +103,38 @@ tasks:
   db:upgrade:
     desc: Apply database migrations
     cmds:
-      - alembic upgrade head
+      - uv run alembic upgrade head
 
   db:downgrade:
     desc: Rollback one migration
     cmds:
-      - alembic downgrade -1
+      - uv run alembic downgrade -1
 
   db:revision:
     desc: Create a new migration (use -- -m "message")
     cmds:
-      - alembic revision --autogenerate {{.CLI_ARGS}}
+      - uv run alembic revision --autogenerate {{.CLI_ARGS}}
 
   db:current:
     desc: Show current migration version
     cmds:
-      - alembic current
+      - uv run alembic current
 
   # Running services
   run:
     desc: Run the Telegram bot
     cmds:
-      - python -m bot
+      - uv run python -m bot
 
   run:worker:
     desc: Run the task worker standalone
     cmds:
-      - python -m core.worker
+      - uv run python -m core.worker
 
   run:cli:
     desc: Run CLI
     cmds:
-      - python -m core.cli
+      - uv run python -m core.cli
 
   clean:
     desc: Clean up temporary files and cache
