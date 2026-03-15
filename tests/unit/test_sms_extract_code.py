@@ -1,4 +1,10 @@
-"""Tests for SessionManagementService.extract_code()."""
+"""Tests for SessionManagementService.extract_code().
+
+Covers the code extraction flow on the Claude "Authentication Code" page:
+- Code is extracted from <pre> tag after "Authentication Code" heading appears
+- Authorize button click flow before code extraction
+- Error cases: empty code, short code, missing elements
+"""
 
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -15,7 +21,6 @@ from tests.fixtures.fake_browser import (
     FakePlaywright,
     build_extract_code_scenario,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers (mock-based, for low-level edge case tests)
@@ -97,6 +102,36 @@ def _build_service(
     return service, page, context
 
 
+def _build_code_page(
+    *,
+    auth_code: str = "",
+    has_heading: bool = True,
+    has_pre: bool = True,
+) -> FakePage:
+    """Build a FakePage that lands directly on the code page (no consent screen).
+
+    Useful for testing code extraction in isolation without Authorize button flow.
+    """
+    page = FakePage()
+    page._url_to_state = {"oauth/authorize": "code_page"}
+
+    text_elements: dict[str, FakeElement] = {}
+    if has_heading:
+        text_elements["Authentication Code"] = FakeElement(
+            text="Authentication Code",
+        )
+    page._text_elements["code_page"] = text_elements
+
+    css_elements: dict[str, FakeElement] = {}
+    if has_pre:
+        css_elements["pre"] = FakeElement(text=auth_code)
+    page._css_elements["code_page"] = css_elements
+
+    page._html = {"code_page": "<html><h3>Authentication Code</h3><pre>" + auth_code + "</pre></html>"}
+
+    return page
+
+
 # ---------------------------------------------------------------------------
 # Edge case tests (mock-based)
 # ---------------------------------------------------------------------------
@@ -112,52 +147,6 @@ async def test__extract_code__session_path_missing__raises_session_error(
         await service.extract_code(
             tmp_path / "nonexistent", "https://claude.ai/auth/authorize?x=1"
         )
-
-
-@pytest.mark.unit
-async def test__extract_code__code_found_no_authorize__returns_code(
-    tmp_path: Path,
-) -> None:
-    from patchright.async_api import TimeoutError as PlaywrightTimeoutError
-
-    page = _make_page()
-
-    cookie_locator = AsyncMock()
-    cookie_locator.first = cookie_locator
-    cookie_locator.click = AsyncMock(side_effect=PlaywrightTimeoutError("no popup"))
-
-    authorize_locator = AsyncMock()
-    authorize_locator.wait_for = AsyncMock(
-        side_effect=PlaywrightTimeoutError("no button")
-    )
-
-    code_locator = AsyncMock()
-    code_locator.first = code_locator
-    code_locator.wait_for = AsyncMock()
-    code_locator.text_content = AsyncMock(return_value="ABCD1234")
-
-    def locator_side_effect(selector: str) -> AsyncMock:
-        if "Reject All" in selector or "Accept All" in selector:
-            return cookie_locator
-        if "Authorize" in selector:
-            return authorize_locator
-        return code_locator
-
-    page.locator.side_effect = locator_side_effect
-
-    context = _make_context(page)
-    playwright = _make_playwright(context)
-    service = _make_service(playwright=playwright)
-
-    session_path = tmp_path / "session"
-    session_path.mkdir()
-
-    result = await service.extract_code(
-        session_path, "https://claude.ai/auth/authorize?x=1"
-    )
-
-    assert result == "ABCD1234"
-    context.close.assert_called_once()
 
 
 @pytest.mark.unit
@@ -203,15 +192,126 @@ async def test__extract_code__timeout__raises_browser_error(
 
 
 # ---------------------------------------------------------------------------
-# Scenario tests (FakePage state machine + HTML fixtures)
+# Code extraction from <pre> tag (FakePage scenario tests)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test__extract_code__authorize_click_then_code_in_text__returns_code(
+async def test__extract_code__reads_code_from_pre_tag(tmp_path: Path) -> None:
+    """Code is extracted from <pre> tag text content after heading appears."""
+    valid_code = "t0W3NtDRX8TKw2dLubFXgmNANZH4cT5cpqvG1L9pLYgRwjjE"
+    page = _build_code_page(auth_code=valid_code)
+    service, _, context = _build_service(page)
+
+    session_path = tmp_path / "session"
+    session_path.mkdir()
+
+    result = await service.extract_code(session_path, AUTH_URL)
+
+    assert result == valid_code
+    assert context.closed
+
+
+@pytest.mark.unit
+async def test__extract_code__strips_whitespace_from_pre_content(
     tmp_path: Path,
 ) -> None:
-    """Happy path: consent screen → click Authorize → code appears in <code> tag."""
+    """Whitespace around code in <pre> is stripped."""
+    page = _build_code_page(auth_code="  CODE_WITH_WHITESPACE_1234567  ")
+    service, _, _ = _build_service(page)
+
+    session_path = tmp_path / "session"
+    session_path.mkdir()
+
+    result = await service.extract_code(session_path, AUTH_URL)
+
+    assert result == "CODE_WITH_WHITESPACE_1234567"
+
+
+@pytest.mark.unit
+async def test__extract_code__pre_empty__raises_browser_error(
+    tmp_path: Path,
+) -> None:
+    """Empty <pre> tag triggers BrowserError with 'empty' message."""
+    page = _build_code_page(auth_code="")
+    service, _, context = _build_service(page)
+
+    session_path = tmp_path / "session"
+    session_path.mkdir()
+
+    with pytest.raises(BrowserError, match="empty"):
+        await service.extract_code(session_path, AUTH_URL)
+
+    assert context.closed
+
+
+@pytest.mark.unit
+async def test__extract_code__code_too_short__raises_browser_error(
+    tmp_path: Path,
+) -> None:
+    """Code shorter than 20 characters is treated as invalid."""
+    page = _build_code_page(auth_code="short")
+    service, _, context = _build_service(page)
+
+    session_path = tmp_path / "session"
+    session_path.mkdir()
+
+    with pytest.raises(BrowserError, match="empty"):
+        await service.extract_code(session_path, AUTH_URL)
+
+    assert context.closed
+
+
+@pytest.mark.unit
+async def test__extract_code__no_heading__raises_browser_error(
+    tmp_path: Path,
+) -> None:
+    """Missing 'Authentication Code' heading causes timeout -> BrowserError."""
+    page = _build_code_page(
+        auth_code="VALID_CODE_THAT_WONT_BE_REACHED_1234",
+        has_heading=False,
+    )
+    service, _, context = _build_service(page)
+
+    session_path = tmp_path / "session"
+    session_path.mkdir()
+
+    with pytest.raises(BrowserError, match="timed out"):
+        await service.extract_code(session_path, AUTH_URL)
+
+    assert context.closed
+
+
+@pytest.mark.unit
+async def test__extract_code__no_pre_element__raises_browser_error(
+    tmp_path: Path,
+) -> None:
+    """Heading present but no <pre> element causes timeout -> BrowserError."""
+    page = _build_code_page(
+        auth_code="",
+        has_pre=False,
+    )
+    service, _, context = _build_service(page)
+
+    session_path = tmp_path / "session"
+    session_path.mkdir()
+
+    with pytest.raises(BrowserError, match="timed out"):
+        await service.extract_code(session_path, AUTH_URL)
+
+    assert context.closed
+
+
+# ---------------------------------------------------------------------------
+# Authorize button flow (FakePage scenario tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test__extract_code__authorize_click_then_code_in_pre__returns_code(
+    tmp_path: Path,
+) -> None:
+    """Happy path: consent screen -> click Authorize -> code appears in <pre>."""
     page = build_extract_code_scenario(
         auth_code="sk-ant-oc01-FAKE_AUTH_CODE_12345678",
     )
@@ -225,27 +325,6 @@ async def test__extract_code__authorize_click_then_code_in_text__returns_code(
     assert result == "sk-ant-oc01-FAKE_AUTH_CODE_12345678"
     assert page.state == "code_page"
     assert context.closed
-
-
-@pytest.mark.unit
-async def test__extract_code__authorize_click_then_code_in_input_value__returns_code(
-    tmp_path: Path,
-) -> None:
-    """Code is in input value attribute, not text_content."""
-    page = build_extract_code_scenario(
-        auth_code="eyJhbGciOiJSUzI1NiJ9_token_value",
-        code_in_selector='input[name="code"]',
-        code_in_value=True,
-    )
-    service, page, context = _build_service(page)
-
-    session_path = tmp_path / "session"
-    session_path.mkdir()
-
-    result = await service.extract_code(session_path, AUTH_URL)
-
-    assert result == "eyJhbGciOiJSUzI1NiJ9_token_value"
-    assert page.state == "code_page"
 
 
 @pytest.mark.unit
@@ -272,14 +351,8 @@ async def test__extract_code__authorize_with_cookie_popup__returns_code(
 async def test__extract_code__no_authorize_button__code_already_visible(
     tmp_path: Path,
 ) -> None:
-    """No Authorize button — code is already on the page (e.g. repeat visit)."""
-    page = FakePage()
-    page._url_to_state = {"oauth/authorize": "code_page"}
-    page._css_elements["code_page"] = {
-        "code": FakeElement(text="DIRECT_CODE_NO_CONSENT_1234"),
-    }
-    page._html = {"code_page": "<html><code>DIRECT_CODE_NO_CONSENT_1234</code></html>"}
-
+    """No Authorize button -- code page is shown directly (e.g. repeat visit)."""
+    page = _build_code_page(auth_code="DIRECT_CODE_NO_CONSENT_1234")
     service, page, _ = _build_service(page)
 
     session_path = tmp_path / "session"
@@ -294,10 +367,11 @@ async def test__extract_code__no_authorize_button__code_already_visible(
 async def test__extract_code__no_authorize_no_code__raises_browser_error(
     tmp_path: Path,
 ) -> None:
-    """Neither Authorize button nor code element — empty page."""
+    """Neither Authorize button nor code element -- empty page."""
     page = FakePage()
     page._url_to_state = {"oauth/authorize": "empty_page"}
     page._css_elements["empty_page"] = {}
+    page._text_elements["empty_page"] = {}
     page._html = {"empty_page": "<html><body>Something went wrong</body></html>"}
 
     service, page, context = _build_service(page)
@@ -309,6 +383,11 @@ async def test__extract_code__no_authorize_no_code__raises_browser_error(
         await service.extract_code(session_path, AUTH_URL)
 
     assert context.closed
+
+
+# ---------------------------------------------------------------------------
+# Debug and cleanup
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -333,7 +412,7 @@ async def test__extract_code__debug_saves_snapshots(tmp_path: Path) -> None:
 @pytest.mark.unit
 async def test__extract_code__always_closes_context(tmp_path: Path) -> None:
     """Context is closed even on success."""
-    page = build_extract_code_scenario(auth_code="CLOSE_TEST_CODE_123")
+    page = build_extract_code_scenario(auth_code="CLOSE_TEST_CODE_123456789")
     service, _, context = _build_service(page)
 
     session_path = tmp_path / "session"
@@ -350,6 +429,7 @@ async def test__extract_code__closes_context_on_error(tmp_path: Path) -> None:
     page = FakePage()
     page._url_to_state = {"oauth/authorize": "empty_page"}
     page._css_elements["empty_page"] = {}
+    page._text_elements["empty_page"] = {}
     page._html = {"empty_page": "<html></html>"}
 
     service, _, context = _build_service(page)

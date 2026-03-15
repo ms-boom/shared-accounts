@@ -296,50 +296,22 @@ class SessionManagementService:
                 # No Authorize button or no navigation after click
                 logger.debug("No Authorize button found, looking for code directly")
 
-            # Wait for code to appear after authorization
-            code_element = None
-            selectors = [
-                "code",
-                '[data-testid="auth-code"]',
-                'input[name="code"]',
-                "div.auth-code",
-                "pre.code",
-            ]
+            # Wait for "Authentication Code" heading, then extract from <pre>
+            heading = page.get_by_text("Authentication Code")
+            await heading.wait_for(
+                timeout=self.settings.PLAYWRIGHT_TIMEOUT,
+                state="visible",
+            )
 
-            for selector in selectors:
-                try:
-                    code_element = page.locator(selector).first
-                    await code_element.wait_for(
-                        timeout=self.settings.PLAYWRIGHT_TIMEOUT,
-                        state="visible",
-                    )
-                    break
-                except PlaywrightTimeoutError:
-                    continue
-
-            if not code_element:
-                await self._save_debug(page, session_path, "07_no_code_found")
-
-                code_text = await page.locator(
-                    "text=/^[A-Za-z0-9_-]{20,}$/"
-                ).first.text_content(timeout=5000)
-
-                if code_text:
-                    logger.info(
-                        f"Extracted code via regex for session {session_path}"
-                    )
-                    assert isinstance(code_text, str)
-                    return code_text.strip()
-                else:
-                    raise BrowserError(
-                        "Could not find authorization code on page"
-                    )
+            code_element = page.locator("pre").first
+            await code_element.wait_for(
+                timeout=5000,
+                state="visible",
+            )
 
             code = await code_element.text_content()
-            if not code:
-                code = await code_element.get_attribute("value")
-
-            if not code:
+            if not code or len(code.strip()) < 20:
+                await self._save_debug(page, session_path, "07_no_code_found")
                 raise BrowserError("Authorization code element is empty")
 
             logger.info(f"Extracted code for session {session_path}")

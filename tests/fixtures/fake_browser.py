@@ -16,7 +16,6 @@ from pathlib import Path
 
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 
-
 # ---------------------------------------------------------------------------
 # HTML fixtures (minimal anonymized versions of real Claude pages)
 # ---------------------------------------------------------------------------
@@ -265,17 +264,15 @@ def build_extract_code_scenario(
     *,
     has_authorize_button: bool = True,
     auth_code: str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9_fakecode",
-    code_in_selector: str = "code",
-    code_in_value: bool = False,
     has_cookie_popup: bool = False,
 ) -> FakePage:
-    """Build FakePage for extract_code scenario (OAuth consent → code page).
+    """Build FakePage for extract_code scenario (OAuth consent -> code page).
+
+    Matches real Claude flow: "Authentication Code" heading + code in <pre> tag.
 
     Args:
         has_authorize_button: Whether OAuth consent screen has Authorize button.
-        auth_code: Authorization code to display after authorization.
-        code_in_selector: CSS selector where code appears ("code", "input[name=\\"code\\"]", etc).
-        code_in_value: If True, code is in element value (not text).
+        auth_code: Authorization code displayed in <pre> tag after authorization.
         has_cookie_popup: Whether cookie consent banner is shown.
     """
     page = FakePage()
@@ -293,12 +290,13 @@ def build_extract_code_scenario(
     page._css_elements["consent_screen"] = consent_css
 
     # -- Code page state (after Authorize click) --
-    code_element = FakeElement(
-        text="" if code_in_value else auth_code,
-        value=auth_code if code_in_value else "",
-    )
+    # "Authentication Code" heading found via get_by_text()
+    page._text_elements["code_page"] = {
+        "Authentication Code": FakeElement(text="Authentication Code"),
+    }
+    # Code lives in a <pre> tag, found via locator("pre")
     page._css_elements["code_page"] = {
-        code_in_selector: code_element,
+        "pre": FakeElement(text=auth_code),
     }
 
     # -- HTML fixtures --
