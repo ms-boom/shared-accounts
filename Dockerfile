@@ -33,8 +33,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
 # Install Patchright browser (cached layer — rebuilds only when patchright version changes)
-RUN uv run patchright install chrome && \
-    uv run patchright install-deps
+# Use venv python directly to avoid `uv run` which tries to build the project
+RUN .venv/bin/patchright install chrome && \
+    .venv/bin/patchright install-deps
 
 # Copy project source code (changes here don't rebuild layers above)
 COPY src/ ./src/
