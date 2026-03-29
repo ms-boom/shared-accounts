@@ -28,7 +28,7 @@ RUN uv sync --frozen --no-install-project
 
 # Install Patchright browser + system deps, clean caches in one layer
 USER root
-RUN .venv/bin/patchright install chrome && \
+RUN .venv/bin/patchright install chromium && \
     .venv/bin/patchright install-deps && \
     rm -rf /root/.cache /tmp/* /var/lib/apt/lists/*
 USER bot
@@ -48,7 +48,7 @@ RUN mkdir -p /data/sessions /data/logs /data/errors /tmp/.X11-unix && \
     chown -R bot:bot /data && \
     chmod 700 /data/sessions && \
     chmod 1777 /tmp/.X11-unix
-USER bot
+USER root
 
 COPY --chown=bot:bot entrypoint.sh ./
 CMD ["./entrypoint.sh"]

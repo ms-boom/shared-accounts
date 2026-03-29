@@ -52,7 +52,6 @@ class SessionManagementService:
 
         return await self.playwright.chromium.launch_persistent_context(
             user_data_dir=str(session_path),
-            channel="chrome",
             headless=False,
             no_viewport=True,
             args=["--window-size=1920,1080"],
@@ -118,7 +117,7 @@ class SessionManagementService:
             await self._dismiss_cookie_popup(page)
 
             email_input = page.locator('input[type="email"]')
-            await email_input.fill(email)
+            await email_input.fill(email, timeout=self.settings.PLAYWRIGHT_TIMEOUT)
             logger.info(f"Filled email for session {session_path}")
 
             continue_button = page.locator(
