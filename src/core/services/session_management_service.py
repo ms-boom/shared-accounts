@@ -52,7 +52,8 @@ class SessionManagementService:
 
         return await self.playwright.chromium.launch_persistent_context(
             user_data_dir=str(session_path),
-            headless=False,
+            channel="chrome",
+            headless=self.settings.PLAYWRIGHT_HEADLESS,
             no_viewport=True,
             args=["--window-size=1920,1080"],
             ignore_default_args=["--enable-automation"],

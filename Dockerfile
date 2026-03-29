@@ -28,7 +28,7 @@ RUN uv sync --frozen --no-install-project
 
 # Install Patchright browser + system deps, clean caches in one layer
 USER root
-RUN .venv/bin/patchright install chromium && \
+RUN .venv/bin/patchright install chrome && \
     .venv/bin/patchright install-deps && \
     rm -rf /tmp/* /var/lib/apt/lists/*
 USER bot
