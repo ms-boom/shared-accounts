@@ -42,6 +42,14 @@ class SessionManagementService:
         """
         session_path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
+        # Remove stale lock file left after container restart or crash.
+        # Chrome creates SingletonLock tied to the host process; after
+        # container recreation the PID/hostname changes but the volume persists.
+        singleton_lock = session_path / "SingletonLock"
+        if singleton_lock.exists():
+            singleton_lock.unlink()
+            logger.warning("Removed stale SingletonLock from %s", session_path)
+
         return await self.playwright.chromium.launch_persistent_context(
             user_data_dir=str(session_path),
             channel="chrome",

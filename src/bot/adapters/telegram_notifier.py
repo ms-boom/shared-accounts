@@ -23,6 +23,8 @@ class TelegramNotifier:
     async def notify_error(self, chat_id: int, thread_id: int, error: str) -> None:
         await self._send(chat_id, thread_id, f"❌ {error}")
 
+    _MAX_TEXT_LENGTH = 4096
+
     async def _send(
         self,
         chat_id: int,
@@ -30,6 +32,8 @@ class TelegramNotifier:
         text: str,
         parse_mode: str | None = None,
     ) -> None:
+        if len(text) > self._MAX_TEXT_LENGTH:
+            text = text[: self._MAX_TEXT_LENGTH - 3] + "..."
         try:
             kwargs: dict = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
             if thread_id:
