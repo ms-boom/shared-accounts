@@ -30,7 +30,7 @@ RUN uv sync --frozen --no-install-project
 USER root
 RUN .venv/bin/patchright install chromium && \
     .venv/bin/patchright install-deps && \
-    rm -rf /root/.cache /tmp/* /var/lib/apt/lists/*
+    rm -rf /tmp/* /var/lib/apt/lists/*
 USER bot
 
 # Copy project source code (changes here don't rebuild layers above)
