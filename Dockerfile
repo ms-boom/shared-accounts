@@ -32,9 +32,19 @@ COPY README.md ./
 # Install the project itself (fast — dependencies already cached)
 RUN uv sync --frozen
 
-# Create data directories
-RUN mkdir -p /data/sessions /data/logs /data/errors && \
-    chmod 700 /data/sessions
+# Create non-root user for security (Chrome sandbox works without --no-sandbox)
+RUN groupadd --gid 1000 bot && \
+    useradd --uid 1000 --gid bot --shell /bin/bash --create-home bot
+
+# Create data directories and Xvfb socket dir owned by bot user
+RUN mkdir -p /data/sessions /data/logs /data/errors /tmp/.X11-unix && \
+    chown -R bot:bot /data /tmp/.X11-unix && \
+    chmod 700 /data/sessions && \
+    chmod 1777 /tmp/.X11-unix
+
+# App files owned by bot user
+RUN chown -R bot:bot /app
 
 COPY entrypoint.sh ./
+USER bot
 CMD ["./entrypoint.sh"]
