@@ -44,18 +44,20 @@ async def help_handler(message: Message) -> None:
     """
     is_group = message.chat.type in ["group", "supergroup"]
 
-    help_text = "📚 <b>Доступные команды:</b>\n\n"
+    admin_note = " (в группах — только админы)" if is_group else ""
 
-    help_text += "🔹 /start - Начать работу с ботом\n"
-    help_text += "🔹 /help - Показать это сообщение\n"
-    help_text += "🔹 /health - Проверить состояние системы\n"
+    help_text = "📚 <b>Доступные команды</b>\n\n"
+    help_text += "🔹 /start — начать работу с ботом\n"
+    help_text += "🔹 /help — показать это сообщение\n"
+    help_text += "🔹 /health — проверить состояние системы\n"
 
-    if is_group:
-        help_text += "\n<b>Авторизация Claude Code:</b>\n"
-        help_text += (
-            "🔹 /init_session &lt;email&gt; - Инициализировать сессию (только админы)\n"
-        )
-        help_text += "🔹 /get_code &lt;url&gt; - Получить код авторизации\n"
+    help_text += "\n<b>Авторизация Claude Code</b>\n"
+    help_text += f"1️⃣ /init_session &lt;email&gt; — создать сессию{admin_note}\n"
+    help_text += "2️⃣ пришлите в ответ ссылку из письма от Claude — бот завершит вход\n"
+    help_text += "3️⃣ /get_code &lt;url&gt; — получить код авторизации\n"
+
+    help_text += "\n<b>Настройки браузера</b>\n"
+    help_text += "🔹 /fingerprint — отпечаток браузера для текущей сессии\n"
 
     await message.reply(help_text, parse_mode="HTML")
     logger.info(

@@ -300,16 +300,15 @@ async def handle_claude_url(
     if not message.text:
         return
 
-    # Check if message contains Claude login URL
-    url = message.text.strip()
-    if not ValidationService.is_claude_login_url(url):
+    # Users send the single-use magic link wrapped in `backticks` so Telegram
+    # does not linkify and open it (which would burn the token before the bot
+    # does). The backticks are not part of message.text, so search the text.
+    login_url = ValidationService.extract_claude_login_url(message.text)
+    if not login_url:
         return
 
-    login_url = url
     thread_id = get_thread_id(message)
-    logger.info(
-        f"Detected Claude login URL in chat {message.chat.id}/{thread_id}"
-    )
+    logger.info(f"Detected Claude login URL in chat {message.chat.id}/{thread_id}")
 
     # Read: check for pending init_session (read-only, direct session is fine)
     async with database.read() as db_session:

@@ -15,13 +15,13 @@ services:
       # Uncomment if the tunnel fails to come up on an old/custom kernel:
       # - /lib/modules:/lib/modules:ro
     healthcheck:
-      # Tunnel is alive when the latest handshake is fresh (< 180s).
+      # Tunnel is alive when the peer's last handshake is fresh (< 180s).
+      # A client config has a single peer, so no need to pick the newest of many.
       # $$ escapes $ for Compose (a single $ reaches the container).
       test:
         - CMD-SHELL
         - >-
-          last=$$(wg show wg0 latest-handshakes | awk '{print $$2}' | sort -n | tail -1);
-          [ -n "$$last" ] && [ "$$last" -ne 0 ] && [ $$(( $$(date +%s) - $$last )) -lt 180 ]
+          [ $$(( $$(date +%s) - $$(wg show wg0 latest-handshakes | awk '{print $$2}') )) -lt 180 ]
       interval: 30s
       timeout: 5s
       retries: 3
