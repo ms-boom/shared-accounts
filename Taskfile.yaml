@@ -136,6 +136,39 @@ tasks:
     cmds:
       - uv run python -m core.cli
 
+  # Docker: start/stop
+  up:
+    desc: Start the bot in Docker (no VPN)
+    cmds:
+      - docker compose up -d
+
+  up:vpn:
+    desc: Start the bot in Docker through the WireGuard VPN
+    cmds:
+      - docker compose -f docker-compose.vpn.yml up -d
+
+  down:
+    desc: Stop the Docker bot (no VPN)
+    cmds:
+      - docker compose down
+
+  down:vpn:
+    desc: Stop the Docker bot (VPN mode)
+    cmds:
+      - docker compose -f docker-compose.vpn.yml down
+
+  # Docker: VPN diagnostics
+  vpn:status:
+    desc: Show WireGuard tunnel state (handshake, transfer)
+    cmds:
+      - docker compose -f docker-compose.vpn.yml exec wireguard wg show
+
+  vpn:ip:
+    desc: Show the bot's actual outbound IP (should be the VPN server's)
+    cmds:
+      - docker compose -f docker-compose.vpn.yml exec bot wget -qO- https://api.ipify.org
+      - echo
+
   clean:
     desc: Clean up temporary files and cache
     cmds:

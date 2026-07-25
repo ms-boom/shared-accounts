@@ -1,4 +1,9 @@
+name: shared-accounts
+
 services:
+  # ⚠️ DUPLICATE of the bot service. Keep it identical to docker-compose.vpn.yml
+  #    (that file adds only network_mode and depends_on).
+  #    If you change bot here, mirror the change in docker-compose.vpn.yml.
   bot:
     build:
       context: .

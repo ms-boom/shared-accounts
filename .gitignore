@@ -68,3 +68,6 @@ dmypy.json
 bot.db
 *.session
 .python-version
+
+# WireGuard client config (secret) — keep wg0.conf.example tracked
+wireguard/*.conf

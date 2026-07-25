@@ -1,0 +1,51 @@
+name: shared-accounts
+
+services:
+  wireguard:
+    image: linuxserver/wireguard
+    container_name: shared-accounts-wireguard
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      # Without this the tunnel's routing does not work inside a container.
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      # Client config from the host, read-only. Secret — never committed to git.
+      - ./wireguard/wg0.conf:/config/wg_confs/wg0.conf:ro
+      # Uncomment if the tunnel fails to come up on an old/custom kernel:
+      # - /lib/modules:/lib/modules:ro
+    healthcheck:
+      # Tunnel is alive when the latest handshake is fresh (< 180s).
+      # $$ escapes $ for Compose (a single $ reaches the container).
+      test:
+        - CMD-SHELL
+        - >-
+          last=$$(wg show wg0 latest-handshakes | awk '{print $$2}' | sort -n | tail -1);
+          [ -n "$$last" ] && [ "$$last" -ne 0 ] && [ $$(( $$(date +%s) - $$last )) -lt 180 ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # ⚠️ DUPLICATE of the bot service. Keep it identical to docker-compose.yml.
+  #    Only network_mode and depends_on are added here — no other differences.
+  #    If you change bot here, mirror the change in docker-compose.yml.
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/claude_bot.db
+    volumes:
+      - bot_data:/data
+    # All bot traffic goes through the VPN client's network namespace.
+    # The bot has no own network or ports — that is required for this mode.
+    network_mode: "service:wireguard"
+    depends_on:
+      wireguard:
+        condition: service_healthy
+
+volumes:
+  bot_data:
