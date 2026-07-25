@@ -120,3 +120,77 @@ def test__get_settings__returns_settings_instance() -> None:
     settings = get_settings()
     assert isinstance(settings, Settings)
     assert settings.TELEGRAM_TOKEN == "123456:test"
+
+
+@pytest.mark.unit
+def test__settings__default_fingerprint_profile() -> None:
+    os.environ["TELEGRAM_TOKEN"] = "123456:test"
+    for key in (
+        "DEFAULT_USER_AGENT",
+        "DEFAULT_CPU_CORES",
+        "DEFAULT_DEVICE_MEMORY",
+        "DEFAULT_TIMEZONE",
+        "DEFAULT_LOCALE",
+    ):
+        os.environ.pop(key, None)
+
+    settings = Settings(TELEGRAM_TOKEN="123456:test")
+
+    assert settings.DEFAULT_USER_AGENT == (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+    )
+    assert settings.DEFAULT_CPU_CORES == 8
+    assert settings.DEFAULT_DEVICE_MEMORY == 8
+    assert settings.DEFAULT_TIMEZONE == "America/New_York"
+    assert settings.DEFAULT_LOCALE == "en-US"
+
+
+@pytest.mark.unit
+def test__settings__rejects_invalid_default_device_memory() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(TELEGRAM_TOKEN="123456:test", DEFAULT_DEVICE_MEMORY=3)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert "Device memory" in str(errors[0]["ctx"]["error"])
+
+
+@pytest.mark.unit
+def test__settings__rejects_invalid_default_cpu_cores() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(TELEGRAM_TOKEN="123456:test", DEFAULT_CPU_CORES=64)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert "CPU cores" in str(errors[0]["ctx"]["error"])
+
+
+@pytest.mark.unit
+def test__settings__rejects_invalid_default_timezone() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(TELEGRAM_TOKEN="123456:test", DEFAULT_TIMEZONE="Mars/Olympus_Mons")
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert "Unknown IANA timezone" in str(errors[0]["ctx"]["error"])
+
+
+@pytest.mark.unit
+def test__settings__rejects_invalid_default_locale() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(TELEGRAM_TOKEN="123456:test", DEFAULT_LOCALE="EN_us")
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert "Locale" in str(errors[0]["ctx"]["error"])
+
+
+@pytest.mark.unit
+def test__settings__rejects_empty_default_user_agent() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(TELEGRAM_TOKEN="123456:test", DEFAULT_USER_AGENT="   ")
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert "User-Agent" in str(errors[0]["ctx"]["error"])

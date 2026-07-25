@@ -11,13 +11,16 @@ from aiogram.enums import ParseMode
 from bot.adapters.telegram_notifier import TelegramNotifier
 from bot.container import create_container
 from bot.db.fsm_storage import BotFSMStorage
-from bot.handlers import claude_auth, common, group_admin, group_events
+from bot.handlers import claude_auth, common, fingerprint, group_admin, group_events
 from bot.middleware.error_handler import ErrorHandlerMiddleware
 from bot.middleware.group_tracker import GroupTrackerMiddleware
+from bot.services.fingerprint_access_service import FingerprintAccessService
 from bot.services.permission_service import PermissionService
 from core.config import get_settings
 from core.db.database import Database
 from core.logging_config import setup_logging
+from core.services.fingerprint_management_service import FingerprintManagementService
+from core.services.fingerprint_resolution_service import FingerprintResolutionService
 from core.services.group_service import GroupService
 from core.services.user_service import UserService
 from core.worker.task_worker import TaskWorker
@@ -96,6 +99,9 @@ async def main() -> None:
     permission_service = PermissionService(settings)
     group_service = GroupService(database)
     user_service = UserService(database)
+    fingerprint_resolution_service = container.resolve(FingerprintResolutionService)
+    fingerprint_management_service = container.resolve(FingerprintManagementService)
+    fingerprint_access_service = FingerprintAccessService(permission_service)
 
     # Create bot
     bot = Bot(
@@ -113,6 +119,7 @@ async def main() -> None:
     # Register middleware
     dp.message.middleware(ErrorHandlerMiddleware())
     dp.message.middleware(GroupTrackerMiddleware(group_service, user_service))
+    dp.callback_query.middleware(ErrorHandlerMiddleware())
 
     # Make services available to handlers via dependency injection
     dp["permission_service"] = permission_service
@@ -120,12 +127,16 @@ async def main() -> None:
     dp["user_service"] = user_service
     dp["database"] = database
     dp["settings"] = settings
+    dp["fingerprint_resolution_service"] = fingerprint_resolution_service
+    dp["fingerprint_management_service"] = fingerprint_management_service
+    dp["fingerprint_access_service"] = fingerprint_access_service
 
     # Register routers
     dp.include_router(common.router)
     dp.include_router(claude_auth.router)
     dp.include_router(group_events.router)
     dp.include_router(group_admin.router)
+    dp.include_router(fingerprint.router)
 
     # SQLite allows only one writer — worker must share the same process and SQLiteWriterQueue
     worker = TaskWorker(database, settings, TelegramNotifier(bot))

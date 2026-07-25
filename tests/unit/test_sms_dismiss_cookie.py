@@ -4,16 +4,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.config import Settings
 from core.services.session_management_service import SessionManagementService
 
 
-def _make_settings() -> MagicMock:
-    from core.config import Settings
-
-    settings = MagicMock(spec=Settings)
-    settings.PLAYWRIGHT_TIMEOUT = 30000
-    settings.BROWSER_DEBUG = True
-    return settings
+def _make_settings() -> Settings:
+    """Real `Settings`, `_env_file=None` so local `.env` cannot leak into tests."""
+    return Settings(
+        _env_file=None,
+        TELEGRAM_TOKEN="test-token",
+        PLAYWRIGHT_TIMEOUT=30000,
+        BROWSER_DEBUG=True,
+    )
 
 
 def _make_page() -> MagicMock:

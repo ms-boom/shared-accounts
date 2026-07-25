@@ -5,17 +5,35 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.config import Settings
 from core.exceptions import BrowserError, SessionError
+from core.fingerprint import EffectiveFingerprint
 from core.services.session_management_service import SessionManagementService
 
 
-def _make_settings() -> MagicMock:
-    from core.config import Settings
+def _make_settings() -> Settings:
+    """Real `Settings`, `_env_file=None` so local `.env` cannot leak into tests."""
+    return Settings(
+        _env_file=None,
+        TELEGRAM_TOKEN="test-token",
+        PLAYWRIGHT_TIMEOUT=30000,
+        BROWSER_DEBUG=True,
+    )
 
-    settings = MagicMock(spec=Settings)
-    settings.PLAYWRIGHT_TIMEOUT = 30000
-    settings.BROWSER_DEBUG = True
-    return settings
+
+def _default_fingerprint() -> EffectiveFingerprint:
+    """Fixed fingerprint value object — these tests exercise value threading,
+    not fingerprint resolution (that's `FingerprintResolutionService`'s job)."""
+    return EffectiveFingerprint(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        cpu_cores=8,
+        device_memory=8,
+        timezone="America/New_York",
+        locale="en-US",
+    )
 
 
 def _make_page() -> MagicMock:
@@ -63,7 +81,9 @@ async def test__process_login__session_path_missing__raises_session_error(
 
     with pytest.raises(SessionError, match="No session found"):
         await service.process_login(
-            tmp_path / "nonexistent", "https://claude.ai/login?token=x"
+            tmp_path / "nonexistent",
+            "https://claude.ai/login?token=x",
+            fingerprint=_default_fingerprint(),
         )
 
 
@@ -102,7 +122,9 @@ async def test__process_login__success__returns_success_message(
     session_path.mkdir()
 
     result = await service.process_login(
-        session_path, "https://claude.ai/login?token=valid"
+        session_path,
+        "https://claude.ai/login?token=valid",
+        fingerprint=_default_fingerprint(),
     )
 
     assert "Session initialized successfully" in result
@@ -127,5 +149,7 @@ async def test__process_login__timeout__raises_browser_error(
 
     with pytest.raises(BrowserError, match="invalid or expired"):
         await service.process_login(
-            session_path, "https://claude.ai/login?token=expired"
+            session_path,
+            "https://claude.ai/login?token=expired",
+            fingerprint=_default_fingerprint(),
         )

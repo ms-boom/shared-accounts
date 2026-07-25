@@ -1,0 +1,385 @@
+# Shared Accounts / Claude Authorization Bot
+
+> Telegram bot (aiogram 3.x) that automates obtaining Claude Code authorization
+> codes via a headless browser (Patchright/Playwright), so users get codes in
+> Telegram instead of manually opening email and copying links. Sessions are
+> isolated per (chat_id, thread_id) — including Telegram Topics — and each
+> session can carry its own browser fingerprint (User-Agent, CPU/memory,
+> timezone, locale) to make different Claude accounts look like different
+> devices.
+
+Tech Stack: Python 3.12+, aiogram 3.13+, Patchright (patched Playwright)
+1.40+, SQLAlchemy 2.0+ (async) + aiosqlite, Alembic, Pydantic Settings 2.10+,
+punq (DI), structlog, click (CLI). SQLite only — Postgres is not supported
+(`DATABASE_URL` is validated to start with `sqlite`).
+
+**IMPORTANT — layout note**: the project root `CLAUDE.md` "Структура проекта"
+section describes an older `bot/`-only layout and PostgreSQL-based queue. Both
+are stale. The actual code lives under `src/`, split into `src/core/`
+(framework-agnostic domain: db, services, worker, config, exceptions, cli,
+fingerprint) and `src/bot/` (Telegram presentation layer: handlers, states,
+filters, middleware, bot-only services, container). `README.md` and
+`tests/TESTING_GUIDE.md` also still describe a PostgreSQL/`bot/` setup in
+places — trust this file and the `src/` tree over those.
+
+## Architecture
+
+### Module Hierarchy
+
+```
+src/
+├── core/                          # Domain layer — no aiogram, no Telegram types
+│   ├── config.py                  # Settings (Pydantic Settings), incl. DEFAULT_* fingerprint profile
+│   ├── ports.py                   # TaskNotifier Protocol + LoggingNotifier (standalone-worker default)
+│   ├── fingerprint.py             # Fingerprint value objects, validators, label/JS builder (pure)
+│   ├── exceptions.py              # BotError hierarchy (DatabaseError, BrowserError, SessionError, ...)
+│   ├── logging_config.py          # structlog setup
+│   ├── db/
+│   │   ├── database.py            # Database manager, SQLiteWriterQueue, PRAGMAs, engine setup
+│   │   ├── models.py               # SQLAlchemy models: Group, User, ChatSession, Fingerprint,
+│   │   │                           # SessionFingerprint, Task, FSMState
+│   │   └── repositories/          # One repository per model, session-injected, no commit()
+│   ├── services/
+│   │   ├── fingerprint_resolution_service.py  # READ-side: per-field fallback merge
+│   │   ├── fingerprint_management_service.py  # WRITE-side: bind/rebind/edit + orphan cleanup
+│   │   ├── session_management_service.py      # Patchright browser automation (login/extract)
+│   │   ├── group_service.py / user_service.py # Registration on first contact
+│   │   └── validation_service.py              # Email / Claude URL regex validators
+│   ├── worker/
+│   │   ├── task_worker.py         # Polls tasks table, dispatches by task_type, retries/recovery
+│   │   └── playwright_service.py  # chat_id/thread_id-based wrapper over SessionManagementService
+│   └── cli/                       # `python -m core.cli` — path-based session management (no DB required)
+│       └── commands/account.py    # init-session, process-login, get-code, list-chats, delete-session
+│
+└── bot/                            # Presentation layer — Telegram-specific
+    ├── __main__.py                 # Entry point: builds DI, registers routers, runs bot + worker task
+    ├── container.py                # Bot-side punq registrations (delegates core DI to core.container)
+    ├── adapters/telegram_notifier.py  # TaskNotifier impl backed by aiogram Bot
+    ├── db/fsm_storage.py           # BotFSMStorage — SQLite-backed aiogram FSM storage
+    ├── handlers/                   # claude_auth, fingerprint, group_admin, group_events, common
+    ├── states/                     # FSM StatesGroups (fingerprint 5-step chain, group_settings)
+    ├── filters/                    # IsGroupAdmin, IsGroup, IsPrivateChat
+    ├── middleware/                 # ErrorHandlerMiddleware, GroupTrackerMiddleware
+    └── services/                   # permission_service (admin cache), fingerprint_access_service,
+                                     # group_context_service
+```
+
+`core.container.create_container(settings)` registers `Settings`, `Database`
+(singleton), `FingerprintResolutionService`, `FingerprintManagementService`.
+`bot.container` builds on top of it for bot-only services. Import boundaries
+are enforced by **import-linter** (`pyproject.toml` → `[tool.importlinter]`,
+run via `task lint:imports`):
+- `core` has zero dependency on `bot` (independence contract)
+- `bot` depends on `core`, never the reverse (layers contract)
+- `core` may never import `aiogram` (forbidden-modules contract)
+
+### Data Flow
+
+```
+Telegram update
+      │
+      ▼
+aiogram Dispatcher (src/bot/__main__.py)
+  ErrorHandlerMiddleware → GroupTrackerMiddleware → Router (handlers/*)
+      │
+      │  handler validates input, writes a Task row via database.write()
+      ▼
+tasks table (SQLite)  ◄── single writer, serialized by SQLiteWriterQueue
+      │
+      │  TaskWorker.run() polls (asyncio.Task inside the SAME bot process)
+      ▼
+TaskWorker.process_task()
+      │  resolves EffectiveFingerprint for (chat_id, thread_id)
+      ▼
+PlaywrightService → SessionManagementService (Patchright, persistent browser
+                     context per chat_id[/thread_id], fingerprint applied)
+      │
+      ▼
+TelegramNotifier.notify_success/error → message sent back to the chat
+```
+
+**Why the worker lives inside the bot process**: SQLite allows exactly one
+writer connection. A standalone `python -m core.worker` process still exists
+for debugging, but running it alongside the bot against the same DB file
+causes write contention — in normal operation the worker is an
+`asyncio.Task` started from `bot/__main__.py::main()`, sharing the bot's
+single `SQLiteWriterQueue`.
+
+**Session isolation**: every session is keyed by `(chat_id, thread_id)`;
+`thread_id=0` means the main chat, `thread_id>0` a Telegram Topic. Browser
+data lives at `SESSION_DIR/{chat_id}/` (main chat) or
+`SESSION_DIR/{chat_id}/{thread_id}/` (topic), directory mode `0o700`.
+
+## Key Patterns
+
+### SQLite single-writer serialization
+
+All writes funnel through `Database.write(fn)`, which submits `fn` to a
+background `SQLiteWriterQueue` task — the only place that opens a write
+transaction. Reads bypass the queue entirely (WAL mode allows concurrent
+readers).
+
+```python
+# core/db/database.py — every mutating operation follows this shape
+async def _create_task(session: AsyncSession) -> dict:
+    task_repo = TaskRepository(session)
+    return await task_repo.create(chat_id=..., task_type=..., payload=...)
+
+task = await database.write(_create_task)   # fn must NOT commit() or close()
+
+# Reads go straight through a context-managed session (no queue):
+async with database.read() as session:
+    session_repo = ChatSessionRepository(session)
+    existing = await session_repo.get_by_chat_id(chat_id, thread_id)
+```
+
+Required SQLite PRAGMAs are applied on every new DBAPI connection via a
+`connect` event listener (`_apply_sqlite_pragmas`): `journal_mode=WAL`,
+`synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON`.
+
+### Repository Pattern (session-injected, no commit)
+
+Every repository takes an `AsyncSession` in `__init__`, uses `flush()` (never
+`commit()`/`close()`) — the caller (a `database.write`/`database.read` block)
+owns the transaction boundary.
+
+```python
+class FingerprintRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, *, values: FingerprintValues, label, created_by) -> dict:
+        fingerprint = Fingerprint(..., created_by=created_by)
+        self.session.add(fingerprint)
+        await self.session.flush()          # not commit — caller's transaction
+        return _row_to_dict(fingerprint)
+```
+
+### Per-field fallback resolution (fingerprint)
+
+`FingerprintResolutionService.merge()` is the single place that decides,
+field by field, whether a stored value or the default profile wins. Every
+other read path (`resolve`, `resolve_view`, the `/fingerprint` view card)
+routes through it so behavior and display can never disagree.
+
+```python
+def merge(self, stored: FingerprintValues | None) -> EffectiveFingerprint:
+    if stored is None:
+        return self._default
+    return EffectiveFingerprint(
+        user_agent=stored.user_agent if stored.user_agent is not None
+                   else self._default.user_agent,
+        # ...same per-field fallback for cpu_cores, device_memory, timezone, locale
+    )
+```
+
+### Orphan-cleanup rule (fingerprint sharing)
+
+A `Fingerprint` row can be bound to several sessions
+(`SessionFingerprint.chat_id/thread_id -> fingerprint_id`, "shared by
+reference"). `FingerprintManagementService._cleanup_if_orphan()` is the single
+place that deletes a fingerprint once its last binding is removed — called
+after every binding move (reset, detach-and-set-own, copy that replaces a
+prior binding), all within the same `database.write()` call so the check and
+delete are atomic.
+
+### Optimistic locking on tasks
+
+`Task.version` guards concurrent status updates; `TaskRepository.update_status`
+only applies if the passed version still matches, returning `None` on
+conflict (caller logs and drops the update rather than overwriting newer
+state).
+
+### Access control: private = self, group = admin
+
+```python
+# bot/services/fingerprint_access_service.py — same rule the whole feature uses
+async def is_owned(self, bot, user_id, chat_id, thread_id=0) -> bool:
+    if chat_id > 0:                      # private chat: chat_id == user_id
+        return chat_id == user_id
+    return await self.permission_service.is_group_admin(bot, user_id, chat_id)
+```
+
+`PermissionService` caches `get_chat_member` admin lookups for
+`PERMISSION_CACHE_TTL` seconds (default 300) to reduce Telegram API calls.
+
+### Middleware chain
+
+`ErrorHandlerMiddleware` (catches `BotError` → user-facing reply; anything
+else → generic "Произошла ошибка" + full traceback logged) wraps
+`GroupTrackerMiddleware` (auto-registers users/groups on first contact per
+process, in-memory TTL cache to avoid a DB write on every message).
+
+### FSM via SQLite (survives restarts)
+
+`BotFSMStorage` (src/bot/db/fsm_storage.py) implements aiogram's `BaseStorage`
+against the `fsm_states` table, composite key `(chat_id, user_id, thread_id)`.
+Writes go through `Database.write` (upsert via `sqlite_insert(...).on_conflict_do_update`);
+reads bypass the queue. Used for the `/fingerprint` 5-step dialog
+(`FingerprintStates`) and any future multi-step admin flows.
+
+## Module Responsibilities
+
+- `core.config.Settings` → env-driven config incl. `DEFAULT_USER_AGENT`/`DEFAULT_CPU_CORES`/`DEFAULT_DEVICE_MEMORY`/`DEFAULT_TIMEZONE`/`DEFAULT_LOCALE` (`src/core/config.py`)
+- `core.db.database.Database` → engine lifecycle, `SQLiteWriterQueue`, read/write session helpers (`src/core/db/database.py`)
+- `core.db.models` → `Group`, `User`, `ChatSession`, `Fingerprint`, `SessionFingerprint`, `Task`, `FSMState` (`src/core/db/models.py`)
+- `core.fingerprint` → `FingerprintValues`/`EffectiveFingerprint`/`FingerprintView` dataclasses, field validators, `build_navigator_init_script`, `build_label` — pure, dependency-free (`src/core/fingerprint.py`)
+- `core.services.fingerprint_resolution_service.FingerprintResolutionService` → READ-side per-field merge (`src/core/services/fingerprint_resolution_service.py`)
+- `core.services.fingerprint_management_service.FingerprintManagementService` → WRITE-side set_own/copy_from/edit_shared/reset + orphan cleanup (`src/core/services/fingerprint_management_service.py`)
+- `core.worker.task_worker.TaskWorker` → poll/dispatch/retry/stuck-task-recovery loop (`src/core/worker/task_worker.py`)
+- `core.worker.playwright_service.PlaywrightService` → chat_id/thread_id → session path, fingerprint resolution, delegates to `SessionManagementService` (`src/core/worker/playwright_service.py`)
+- `core.services.session_management_service.SessionManagementService` → Patchright browser automation: login, magic-link processing, code extraction (`src/core/services/session_management_service.py`)
+- `core.cli` → `python -m core.cli account ...`, path-based session management independent of Telegram/DB (`src/core/cli/`)
+- `bot.handlers.claude_auth` → `/init_session`, `/get_code`, `/health`, plain-message Claude-URL detection (`src/bot/handlers/claude_auth.py`)
+- `bot.handlers.fingerprint` → `/fingerprint` view card + 5-step FSM dialog (set own / edit shared / copy / reset) (`src/bot/handlers/fingerprint.py`)
+- `bot.services.fingerprint_access_service.FingerprintAccessService` → ownership checks, needs `Bot` so it lives in the bot layer not core (`src/bot/services/fingerprint_access_service.py`)
+- `bot.services.permission_service.PermissionService` → cached `is_group_admin` (`src/bot/services/permission_service.py`)
+- `bot.middleware.error_handler` / `group_tracker` → global error replies, auto user/group registration (`src/bot/middleware/`)
+- `bot.db.fsm_storage.BotFSMStorage` → SQLite-backed aiogram FSM storage (`src/bot/db/fsm_storage.py`)
+
+## Browser Fingerprint Feature
+
+Per-account/session browser fingerprint, added to make different Claude
+accounts present as different devices while one account stays stable over
+time. `/fingerprint` (admin-only per the access rule above) shows a view card
+and a menu:
+
+- **Задать свой (Set own)** — 5-step FSM chain (`user_agent → cpu_cores →
+  device_memory → timezone → locale`, each step skippable) creates a
+  session-only `Fingerprint` row and binds it, detaching from any previously
+  shared one (old binding orphan-collected).
+- **Изменить для всех N (Edit shared)** — only shown/allowed when the current
+  binding is shared by >1 session and the caller owns at least one of the
+  bound sessions (`can_edit_fingerprint`); overwrites the shared row in place,
+  affecting every session bound to it.
+- **Скопировать из своей сессии (Copy from my session)** — pick another
+  session the caller owns and bind by reference (shared, not duplicated).
+- **Сбросить (Reset)** — unbind, reverting to the default profile;
+  orphan-cleaned if nothing else references it.
+
+Storage: `fingerprints` (values, nullable per field, `label`, audit-only
+`created_by`) + `session_fingerprints` (`(chat_id, thread_id) → fingerprint_id`,
+composite PK — a session has at most one binding), added in migration `002`
+(`migrations/versions/002_fingerprints.py`, no data backfill: unbound sessions
+resolve to the default profile behaviorally). `SessionFingerprint` carries no
+FK to `chat_sessions` — a fingerprint can be bound before `/init_session`
+creates the session row.
+
+Applied in `SessionManagementService._create_persistent_context`:
+`user_agent`/`locale`/`timezone_id` as `launch_persistent_context` kwargs;
+`cpu_cores`/`device_memory` via an `add_init_script` JS override of
+`navigator.hardwareConcurrency`/`navigator.deviceMemory` (browsers cap
+`deviceMemory` reporting at 8, hence the `{1,2,4,8}` validator). Resolved
+fresh on every operation (`PlaywrightService._resolve`, not cached) — a mid-
+session edit takes effect on the *next* browser operation on that session.
+
+CLI account commands (`python -m core.cli account ...`) have no `chat_id`
+context, so they always use `resolution_service.default()`.
+`delete-session` is the one CLI command that does touch the DB: if the path
+matches a bot-created `chat_sessions` row it deletes that row and unbinds
+(orphan-collects) its fingerprint in the same write.
+
+## Configuration
+
+All configuration is environment-variable driven via Pydantic Settings
+(`core.config.Settings`, `.env` file). Key groups (see `.env.example` for the
+full, current list):
+
+- `TELEGRAM_TOKEN` (required) — from @BotFather
+- `DATABASE_URL` — must start with `sqlite`; default `sqlite+aiosqlite:////data/claude_bot.db`
+- `SESSION_DIR` / `DATA_DIR` / `LOG_DIR` / `ERROR_DIR` — filesystem layout, default under `/data`
+- `PLAYWRIGHT_HEADLESS`, `PLAYWRIGHT_TIMEOUT` (ms), `BROWSER_DEBUG` (saves screenshot+HTML per step; error snapshots always saved regardless)
+- `WORKER_POLL_INTERVAL`, `WORKER_RETRY_ATTEMPTS`, `WORKER_RETRY_BACKOFF` ("2,4,8"), `TASK_STUCK_TIMEOUT` (min), `TASK_RECOVERY_INTERVAL` (s)
+- `PERMISSION_CACHE_TTL` (s, default 300)
+- `DEFAULT_USER_AGENT`, `DEFAULT_CPU_CORES` (1-32), `DEFAULT_DEVICE_MEMORY` ({1,2,4,8}), `DEFAULT_TIMEZONE` (IANA), `DEFAULT_LOCALE` — the fallback fingerprint profile; validated with the exact same functions the FSM step handlers use (`core/fingerprint.py`), so config defaults and user input can never diverge on what's valid.
+
+Docker: single `Dockerfile` builds one image (`bot` service in
+`docker-compose.yml`) running both the aiogram bot and the embedded worker
+task; `bot_data` named volume persists `/data` (sessions, SQLite DB, logs,
+error screenshots). Patchright launches with `channel="chrome"` (system
+Chrome, not the bundled Chromium) — chosen because it reliably bypasses
+Cloudflare Turnstile in this deployment; the Dockerfile still installs
+Patchright's own Chromium binaries as a preserved cache layer.
+
+## Common Pitfalls
+
+- **Never call `session.commit()`/`close()` inside a `database.write(fn)`
+  callback.** The `SQLiteWriterQueue` writer loop owns the transaction
+  (`async with session.begin(): result = await fn(session)`); committing
+  early or closing breaks the queue's lifecycle assumptions.
+- **Don't run the standalone worker (`python -m core.worker`) against the
+  same DB file as a running bot.** SQLite allows one writer; the bot's
+  embedded worker task already shares the bot process's single
+  `SQLiteWriterQueue`. A second process opening its own write connection
+  reintroduces "database is locked".
+- **A `None` in a `FingerprintValues` field is meaningful — it means "no
+  override", not "unset accidentally".** Resolution falls back to the
+  default profile per field; don't coerce `None` to a sentinel value
+  upstream or the fallback logic breaks silently.
+- **`created_by` on `Fingerprint` is audit-only, never authority.** Access
+  decisions always go through `FingerprintAccessService.is_owned`
+  (private-chat self-check or group-admin check) — never compare
+  `created_by == user_id` for permission purposes.
+- **Root `CLAUDE.md`, `README.md`, and `tests/TESTING_GUIDE.md` describe a
+  stale `bot/`-package / PostgreSQL setup.** The project is SQLite-only
+  (`Settings.validate_sqlite_url` rejects anything else) and code lives
+  under `src/core` + `src/bot`. Trust `src/`, `pyproject.toml`, and this file.
+- **Import-linter enforces `core` independence from `bot` and forbids
+  `aiogram` imports inside `core`.** A new `core` module reaching into
+  `bot.*` (e.g. to use `Bot` directly) will fail `task lint:imports` — put
+  Telegram-API-dependent code in `src/bot/services/` instead (see
+  `FingerprintAccessService`, which needs `Bot.get_chat_member` and
+  therefore lives in `bot`, not `core`).
+- **Stale `SingletonLock` after container restart.** Chrome's persistent
+  context leaves a `SingletonLock` tied to the old PID/hostname;
+  `SessionManagementService._create_persistent_context` removes it
+  automatically before every launch — don't reintroduce a code path that
+  launches without this cleanup.
+
+## Development
+
+### Setup
+
+```bash
+uv sync --group dev                 # install deps (uses .claude-venv/ or .venv per environment)
+cp .env.example .env                # then set TELEGRAM_TOKEN at minimum
+task db:upgrade                     # apply Alembic migrations (creates fingerprints/session_fingerprints etc.)
+uv run patchright install chrome    # browser binaries, if not already cached in the image
+task prek:install                   # optional: pre-commit hooks
+```
+
+### Commands
+
+```bash
+task run              # uv run python -m bot          — bot + embedded worker
+task run:worker        # uv run python -m core.worker  — standalone worker (debug only, see pitfalls)
+task run:cli            # uv run python -m core.cli
+task format            # ruff check --fix + ruff format
+task lint               # ruff + mypy + import-linter (task lint:ruff / lint:mypy / lint:imports)
+task test                # pytest
+task coverage            # pytest --cov=src/core --cov=src/bot --cov-report=html
+task qa                  # format + lint + coverage — run before considering work done
+task db:upgrade / db:downgrade / db:revision -- -m "..." / db:current
+task clean                # remove caches (__pycache__, .pytest_cache, .mypy_cache, .ruff_cache, htmlcov)
+```
+
+### Testing
+
+pytest with `asyncio_mode = "auto"`, `testpaths = ["tests"]`, markers `unit`,
+`integration`, `slow`, `requires_db`, `requires_playwright`
+(`pyproject.toml → [tool.pytest.ini_options]`). Test DB is SQLite via
+Alembic-applied migrations against a temp file (`tests/fixtures/database.py`
+— transactional isolation per test via SQLAlchemy savepoints, session-scoped
+event loop; fixtures load order matters: `tests.fixtures.environment` before
+`tests.fixtures.database`, see `tests/TESTING_GUIDE.md`). `tests/unit/`
+covers repositories, services, handlers (with FakePage/FakeBrowser-style
+Playwright fakes for `test_sms_*` scenario tests), FSM storage, the writer
+queue, and the full fingerprint feature (`test_fingerprint_*.py`,
+`test_playwright_service_fingerprint.py`, `test_sms_fingerprint_wiring.py`).
+52 test files under `tests/unit/` as of this writing; no populated
+`tests/integration/` yet. In tests, prefer `pytest.fail()` over
+`raise Exception()` to avoid the Error-Hiding antipattern (project style
+guide, `CLAUDE.md`).
+
+---
+*Generated by documentation-keeper on 2026-07-25, based on commit `189a76d` (chore(deps): update versions)*

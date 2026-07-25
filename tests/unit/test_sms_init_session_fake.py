@@ -4,12 +4,12 @@ Uses FakePage state machine instead of mocks for readable, scenario-based tests.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 from core.config import Settings
 from core.exceptions import BrowserError
+from core.fingerprint import EffectiveFingerprint
 from core.services.session_management_service import SessionManagementService
 from tests.fixtures.fake_browser import (
     FakeBrowserContext,
@@ -18,13 +18,29 @@ from tests.fixtures.fake_browser import (
 )
 
 
-def _make_settings(
-    timeout: int = 30000, browser_debug: bool = False
-) -> MagicMock:
-    settings = MagicMock(spec=Settings)
-    settings.PLAYWRIGHT_TIMEOUT = timeout
-    settings.BROWSER_DEBUG = browser_debug
-    return settings
+def _make_settings(timeout: int = 30000, browser_debug: bool = False) -> Settings:
+    """Real `Settings`, `_env_file=None` so local `.env` cannot leak into tests."""
+    return Settings(
+        _env_file=None,
+        TELEGRAM_TOKEN="test-token",
+        PLAYWRIGHT_TIMEOUT=timeout,
+        BROWSER_DEBUG=browser_debug,
+    )
+
+
+def _default_fingerprint() -> EffectiveFingerprint:
+    """Fixed fingerprint value object — these tests exercise value threading,
+    not fingerprint resolution (that's `FingerprintResolutionService`'s job)."""
+    return EffectiveFingerprint(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        cpu_cores=8,
+        device_memory=8,
+        timezone="America/New_York",
+        locale="en-US",
+    )
 
 
 def _build_service(
@@ -63,7 +79,9 @@ async def test__init_session__happy_path__returns_email_sent_message(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.initialize_session(session_path, "user@example.com")
+    result = await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert "Email sent" in result
     assert "authorization link" in result
@@ -75,7 +93,9 @@ async def test__init_session__fills_provided_email(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.initialize_session(session_path, "test@example.com")
+    await service.initialize_session(
+        session_path, "test@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert page.filled["email"] == "test@example.com"
 
@@ -86,7 +106,9 @@ async def test__init_session__navigates_to_login_page(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.initialize_session(session_path, "user@example.com")
+    await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert any("claude.ai/login" in url for url in page.goto_history)
 
@@ -100,7 +122,9 @@ async def test__init_session__transitions_to_email_sent_state(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.initialize_session(session_path, "user@example.com")
+    await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert page.state == "email_sent"
 
@@ -117,7 +141,9 @@ async def test__init_session__dismisses_cookie_popup(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.initialize_session(session_path, "user@example.com")
+    result = await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert "Email sent" in result
 
@@ -131,7 +157,9 @@ async def test__init_session__no_cookie_popup__still_succeeds(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.initialize_session(session_path, "user@example.com")
+    result = await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert "Email sent" in result
 
@@ -150,7 +178,9 @@ async def test__init_session__verification_code_variant__returns_success(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.initialize_session(session_path, "user@example.com")
+    result = await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert "Email sent" in result
 
@@ -165,7 +195,9 @@ async def test__init_session__timeout_waiting_for_confirmation(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="timed out"):
-        await service.initialize_session(session_path, "user@example.com")
+        await service.initialize_session(
+            session_path, "user@example.com", fingerprint=_default_fingerprint()
+        )
 
 
 # -----------------------------------------------------------------------
@@ -186,7 +218,9 @@ async def test__init_session__timeout_on_page_load__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="timed out"):
-        await service.initialize_session(session_path, "user@example.com")
+        await service.initialize_session(
+            session_path, "user@example.com", fingerprint=_default_fingerprint()
+        )
 
 
 @pytest.mark.unit
@@ -200,7 +234,9 @@ async def test__init_session__generic_error__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="Failed to initialize session"):
-        await service.initialize_session(session_path, "user@example.com")
+        await service.initialize_session(
+            session_path, "user@example.com", fingerprint=_default_fingerprint()
+        )
 
 
 # -----------------------------------------------------------------------
@@ -214,7 +250,9 @@ async def test__init_session__always_closes_context(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.initialize_session(session_path, "user@example.com")
+    await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert context.closed
 
@@ -230,7 +268,9 @@ async def test__init_session__closes_context_on_error(tmp_path: Path) -> None:
     session_path.mkdir()
 
     with pytest.raises(BrowserError):
-        await service.initialize_session(session_path, "user@example.com")
+        await service.initialize_session(
+            session_path, "user@example.com", fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
 
@@ -248,7 +288,9 @@ async def test__init_session__debug_enabled__saves_snapshots(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.initialize_session(session_path, "user@example.com")
+    await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     debug_dir = session_path / "debug"
     assert debug_dir.exists()
@@ -267,7 +309,9 @@ async def test__init_session__debug_disabled__skips_snapshots(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.initialize_session(session_path, "user@example.com")
+    await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert len(page.screenshot_paths) == 0
 
@@ -277,14 +321,14 @@ async def test__init_session__debug_disabled__saves_error_snapshots(
     tmp_path: Path,
 ) -> None:
     """Error snapshots are always saved regardless of BROWSER_DEBUG."""
-    service, _, _ = _build_service(
-        confirmation_type="none", browser_debug=False
-    )
+    service, _, _ = _build_service(confirmation_type="none", browser_debug=False)
     session_path = tmp_path / "session"
     session_path.mkdir()
 
     with pytest.raises(BrowserError):
-        await service.initialize_session(session_path, "user@example.com")
+        await service.initialize_session(
+            session_path, "user@example.com", fingerprint=_default_fingerprint()
+        )
 
     debug_dir = session_path / "debug"
     assert (debug_dir / "error_init.png").exists()
@@ -304,6 +348,8 @@ async def test__init_session__creates_session_directory(
     session_path = tmp_path / "new_session"
     # Directory does NOT exist yet
 
-    await service.initialize_session(session_path, "user@example.com")
+    await service.initialize_session(
+        session_path, "user@example.com", fingerprint=_default_fingerprint()
+    )
 
     assert session_path.exists()

@@ -6,11 +6,14 @@ import logging
 from pathlib import Path
 
 import click
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from core.db.database import Database
 from core.db.repositories.chat_session_repository import ChatSessionRepository
 from core.exceptions import BrowserError, SessionError
+from core.services.fingerprint_management_service import FingerprintManagementService
+from core.services.fingerprint_resolution_service import FingerprintResolutionService
 from core.services.validation_service import ValidationService
 from core.worker.playwright_service import PlaywrightService
 
@@ -52,7 +55,9 @@ def init_session(ctx: click.Context, session_path: str, email: str) -> None:
     click.echo(f"📁 Session path: {session_dir}")
 
     async def _run() -> None:
-        playwright_service = PlaywrightService(settings)
+        resolution_service = FingerprintResolutionService(settings)
+        default_fp = resolution_service.default()
+        playwright_service = PlaywrightService(settings, resolution_service)
 
         try:
             # Start Playwright
@@ -73,7 +78,7 @@ def init_session(ctx: click.Context, session_path: str, email: str) -> None:
                 raise BrowserError("Browser not initialized")
 
             message = await playwright_service._session_service.initialize_session(
-                session_dir, email
+                session_dir, email, fingerprint=default_fp
             )
 
             click.echo(f"✅ {message}")
@@ -123,7 +128,9 @@ def process_login(ctx: click.Context, session_path: str, login_url: str) -> None
     click.echo(f"📁 Session: {session_dir}")
 
     async def _run() -> None:
-        playwright_service = PlaywrightService(settings)
+        resolution_service = FingerprintResolutionService(settings)
+        default_fp = resolution_service.default()
+        playwright_service = PlaywrightService(settings, resolution_service)
 
         try:
             await playwright_service.start()
@@ -133,7 +140,7 @@ def process_login(ctx: click.Context, session_path: str, login_url: str) -> None
                 raise BrowserError("Browser not initialized")
 
             message = await playwright_service._session_service.process_login(
-                session_dir, login_url
+                session_dir, login_url, fingerprint=default_fp
             )
 
             click.echo(f"✅ {message}")
@@ -185,7 +192,9 @@ def get_code(ctx: click.Context, session_path: str, auth_url: str) -> None:
     click.echo(f"📁 Session: {session_dir}")
 
     async def _run() -> None:
-        playwright_service = PlaywrightService(settings)
+        resolution_service = FingerprintResolutionService(settings)
+        default_fp = resolution_service.default()
+        playwright_service = PlaywrightService(settings, resolution_service)
 
         try:
             await playwright_service.start()
@@ -195,7 +204,7 @@ def get_code(ctx: click.Context, session_path: str, auth_url: str) -> None:
                 raise BrowserError("Browser not initialized")
 
             code = await playwright_service._session_service.extract_code(
-                session_dir, auth_url
+                session_dir, auth_url, fingerprint=default_fp
             )
 
             click.echo("\n✅ Authorization code:\n")
@@ -299,6 +308,48 @@ def list_chats(ctx: click.Context, format: str) -> None:
     asyncio.run(_run())
 
 
+async def _unbind_fingerprint_for_path(
+    database: Database, session_dir: Path
+) -> tuple[int, int] | None:
+    """
+    Delete the matching `chat_sessions` row (if any) and unbind its fingerprint.
+
+    The CLI is path-based and has no chat_id/thread_id argument. A session
+    created purely through the CLI (`init-session` on an arbitrary path) never
+    got a `chat_sessions` row in the first place, so there is nothing to
+    unbind — a `None` result means exactly that, not an error. Only a path
+    that matches a bot-created, chat_id/thread_id-keyed row can carry a
+    fingerprint binding, so we look the row up by `session_path` first.
+
+    Args:
+        database: Started database manager
+        session_dir: Session path passed to `delete-session`
+
+    Returns:
+        `(chat_id, thread_id)` of the unbound session, or `None` if no
+        `chat_sessions` row matched this path
+    """
+    target = str(session_dir)
+
+    async def _do_delete(session: AsyncSession) -> tuple[int, int] | None:
+        session_repo = ChatSessionRepository(session)
+        matches = [
+            row
+            for row in await session_repo.get_all_active()
+            if row["session_path"] == target
+        ]
+        if not matches:
+            return None
+
+        chat_id = matches[0]["chat_id"]
+        thread_id = matches[0]["thread_id"]
+        await session_repo.delete(chat_id, thread_id)
+        await FingerprintManagementService().reset(session, chat_id, thread_id)
+        return (chat_id, thread_id)
+
+    return await database.write(_do_delete)
+
+
 @account.command("delete-session")
 @click.argument("session_path", type=click.Path(exists=True))
 @click.option("--force", is_flag=True, help="Skip confirmation")
@@ -306,6 +357,11 @@ def list_chats(ctx: click.Context, format: str) -> None:
 def delete_session(ctx: click.Context, session_path: str, force: bool) -> None:
     """
     Delete Claude session directory.
+
+    If the path matches a bot-created `chat_sessions` row, that row is
+    deleted and its fingerprint binding is unbound (orphan-collected) in the
+    same write. Pure CLI-only sessions (no matching database row) skip the
+    unbind step — there is nothing to unbind.
 
     Args:
         session_path: Path to Playwright session directory
@@ -315,13 +371,32 @@ def delete_session(ctx: click.Context, session_path: str, force: bool) -> None:
         python -m core.cli account delete-session /data/sessions/my-session
         python -m core.cli account delete-session /data/sessions/my-session --force
     """
+    settings: Settings = ctx.obj["settings"]
     session_dir = Path(session_path)
 
     if not force and not click.confirm(f"Delete session at {session_dir}?"):
         click.echo("❌ Operation cancelled")
         return
 
-    try:
+    async def _run() -> None:
+        database = Database(settings)
+        try:
+            await database.startup()
+            unbound = await _unbind_fingerprint_for_path(database, session_dir)
+        finally:
+            await database.shutdown()
+
+        if unbound is not None:
+            chat_id, thread_id = unbound
+            click.echo(
+                f"✅ Unbound fingerprint and removed database row "
+                f"for chat {chat_id}/{thread_id}"
+            )
+        else:
+            click.echo(
+                "ℹ️  No matching chat session found in database — nothing to unbind."
+            )
+
         import shutil
 
         if session_dir.exists():
@@ -330,6 +405,8 @@ def delete_session(ctx: click.Context, session_path: str, force: bool) -> None:
         else:
             click.echo(f"❌ Session directory not found: {session_dir}")
 
+    try:
+        asyncio.run(_run())
     except Exception as e:
         logger.error(f"Failed to delete session: {e}", exc_info=True)
         click.echo(f"❌ Failed to delete session: {e}", err=True)

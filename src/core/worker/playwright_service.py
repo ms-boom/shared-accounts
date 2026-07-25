@@ -9,7 +9,10 @@ from patchright.async_api import (
 )
 
 from core.config import Settings
+from core.db.database import Database
 from core.exceptions import BrowserError
+from core.fingerprint import EffectiveFingerprint
+from core.services.fingerprint_resolution_service import FingerprintResolutionService
 from core.services.session_management_service import SessionManagementService
 
 logger = logging.getLogger(__name__)
@@ -27,16 +30,47 @@ class PlaywrightService:
     to bypass Cloudflare Turnstile bot detection.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(
+        self,
+        settings: Settings,
+        resolution_service: FingerprintResolutionService,
+        database: Database | None = None,
+    ):
         """
         Initialize Patchright service.
 
         Args:
             settings: Application settings
+            resolution_service: Resolves the effective fingerprint per operation
+            database: Database manager for (chat_id, thread_id) fingerprint
+                lookups. `None` for CLI/path-only usage, where every operation
+                falls back to the default fingerprint profile (no binding is
+                reachable without a chat_id).
         """
         self.settings = settings
+        self.resolution_service = resolution_service
+        self.database = database
         self.playwright: Playwright | None = None
         self._session_service: SessionManagementService | None = None
+
+    async def _resolve(self, chat_id: int, thread_id: int) -> EffectiveFingerprint:
+        """
+        Resolve the effective fingerprint for a session, per operation.
+
+        Not cached: a fingerprint edited between two operations on the same
+        session takes effect on the next one.
+
+        Args:
+            chat_id: Telegram chat_id
+            thread_id: Telegram thread_id (0 for main chat, >0 for topics)
+
+        Returns:
+            Fully-populated `EffectiveFingerprint`
+        """
+        if self.database is None:
+            return self.resolution_service.default()
+        async with self.database.read() as session:
+            return await self.resolution_service.resolve(session, chat_id, thread_id)
 
     async def start(self) -> None:
         """Start Patchright."""
@@ -98,7 +132,10 @@ class PlaywrightService:
             raise BrowserError("Browser not initialized. Call start() first.")
 
         session_path = self._get_session_path(chat_id, thread_id)
-        message = await self._session_service.initialize_session(session_path, email)
+        fingerprint = await self._resolve(chat_id, thread_id)
+        message = await self._session_service.initialize_session(
+            session_path, email, fingerprint=fingerprint
+        )
         return (str(session_path), message)
 
     async def process_login_link(
@@ -126,7 +163,10 @@ class PlaywrightService:
             raise BrowserError("Browser not initialized. Call start() first.")
 
         session_path = self._get_session_path(chat_id, thread_id)
-        return await self._session_service.process_login(session_path, login_url)
+        fingerprint = await self._resolve(chat_id, thread_id)
+        return await self._session_service.process_login(
+            session_path, login_url, fingerprint=fingerprint
+        )
 
     async def extract_authorization_code(
         self,
@@ -153,4 +193,7 @@ class PlaywrightService:
             raise BrowserError("Browser not initialized. Call start() first.")
 
         session_path = self._get_session_path(chat_id, thread_id)
-        return await self._session_service.extract_code(session_path, auth_url)
+        fingerprint = await self._resolve(chat_id, thread_id)
+        return await self._session_service.extract_code(
+            session_path, auth_url, fingerprint=fingerprint
+        )

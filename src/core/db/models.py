@@ -3,7 +3,18 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Index, String, Text, func, text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -164,6 +175,132 @@ class ChatSession(Base):
         thread_str = f", thread_id={self.thread_id}" if self.thread_id else ""
         return (
             f"<ChatSession(chat_id={self.chat_id}{thread_str}, email='{self.email}')>"
+        )
+
+
+class Fingerprint(Base):
+    """
+    Browser fingerprint profile (User-Agent, CPU cores, device memory, timezone, locale).
+
+    Value fields are nullable: a null field means "no override for this field",
+    so resolution falls back to the default profile per field. `created_by` is
+    audit-only (who created this row) and carries no access-control authority —
+    access is decided by group-admin status, never by creator.
+    """
+
+    __tablename__ = "fingerprints"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        comment="Surrogate autoincrement ID (not a Telegram id)",
+    )
+    user_agent: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Browser User-Agent string override",
+    )
+    cpu_cores: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="navigator.hardwareConcurrency override",
+    )
+    device_memory: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="navigator.deviceMemory override, in GB",
+    )
+    timezone: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="IANA timezone override, e.g. 'America/New_York'",
+    )
+    locale: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Locale override, e.g. 'en-US'",
+    )
+    label: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Auto-generated display label",
+    )
+    created_by: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        comment="Telegram user_id who created this profile — audit only, no authority",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        comment="When this profile was created",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="Last time this profile was updated",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Fingerprint(id={self.id}, label='{self.label}')>"
+
+
+class SessionFingerprint(Base):
+    """
+    Binding of a (chat_id, thread_id) session to a Fingerprint profile.
+
+    Composite PK means a session has at most one binding. The key is logical
+    (matches ChatSession's own key) and deliberately carries no FK to
+    `chat_sessions`: a fingerprint can be bound before /init_session creates
+    the session row. thread_id=0 means main chat (not a topic).
+    """
+
+    __tablename__ = "session_fingerprints"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        comment="Telegram chat_id",
+    )
+    thread_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default="0",
+        comment="Telegram thread_id (0 for main chat, >0 for topics)",
+    )
+    fingerprint_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("fingerprints.id"),
+        nullable=False,
+        comment="Bound Fingerprint profile",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        comment="When this binding was created",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="Last time this binding was updated",
+    )
+
+    __table_args__ = (
+        Index("ix_session_fingerprints_fingerprint_id", "fingerprint_id"),
+    )
+
+    def __repr__(self) -> str:
+        thread_str = f", thread_id={self.thread_id}" if self.thread_id else ""
+        return (
+            f"<SessionFingerprint(chat_id={self.chat_id}{thread_str}, "
+            f"fingerprint_id={self.fingerprint_id})>"
         )
 
 

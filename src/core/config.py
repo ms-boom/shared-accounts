@@ -5,6 +5,14 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.fingerprint import (
+    validate_cpu_cores,
+    validate_device_memory,
+    validate_locale,
+    validate_timezone,
+    validate_user_agent,
+)
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -104,6 +112,33 @@ class Settings(BaseSettings):
         description="Interval in seconds for stuck task recovery checks",
     )
 
+    # Default browser fingerprint profile (applied when a session has no
+    # per-session override — see src/core/fingerprint.py for the value objects
+    # and validators shared with the FSM step validators).
+    DEFAULT_USER_AGENT: str = Field(
+        default=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        description="Default User-Agent for browser sessions without an override",
+    )
+    DEFAULT_CPU_CORES: int = Field(
+        default=8,
+        description="Default navigator.hardwareConcurrency (1-32)",
+    )
+    DEFAULT_DEVICE_MEMORY: int = Field(
+        default=8,
+        description="Default navigator.deviceMemory in GB (1, 2, 4, or 8)",
+    )
+    DEFAULT_TIMEZONE: str = Field(
+        default="America/New_York",
+        description="Default IANA timezone for browser sessions without an override",
+    )
+    DEFAULT_LOCALE: str = Field(
+        default="en-US",
+        description="Default locale for browser sessions without an override",
+    )
+
     @field_validator("DATABASE_URL")
     @classmethod
     def validate_sqlite_url(cls, value: str) -> str:
@@ -138,6 +173,36 @@ class Settings(BaseSettings):
         if value_upper not in valid_levels:
             raise ValueError(f"LOG_LEVEL must be one of {valid_levels}, got '{value}'")
         return value_upper
+
+    @field_validator("DEFAULT_USER_AGENT")
+    @classmethod
+    def validate_default_user_agent(cls, value: str) -> str:
+        """Delegate to the shared fingerprint validator (single source of truth)."""
+        return validate_user_agent(value)
+
+    @field_validator("DEFAULT_CPU_CORES")
+    @classmethod
+    def validate_default_cpu_cores(cls, value: int) -> int:
+        """Delegate to the shared fingerprint validator (single source of truth)."""
+        return validate_cpu_cores(value)
+
+    @field_validator("DEFAULT_DEVICE_MEMORY")
+    @classmethod
+    def validate_default_device_memory(cls, value: int) -> int:
+        """Delegate to the shared fingerprint validator (single source of truth)."""
+        return validate_device_memory(value)
+
+    @field_validator("DEFAULT_TIMEZONE")
+    @classmethod
+    def validate_default_timezone(cls, value: str) -> str:
+        """Delegate to the shared fingerprint validator (single source of truth)."""
+        return validate_timezone(value)
+
+    @field_validator("DEFAULT_LOCALE")
+    @classmethod
+    def validate_default_locale(cls, value: str) -> str:
+        """Delegate to the shared fingerprint validator (single source of truth)."""
+        return validate_locale(value)
 
 
 def get_settings() -> Settings:

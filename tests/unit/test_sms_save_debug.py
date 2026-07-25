@@ -5,16 +5,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.config import Settings
 from core.services.session_management_service import SessionManagementService
 
 
-def _make_settings(**overrides) -> MagicMock:
-    from core.config import Settings
-
-    settings = MagicMock(spec=Settings)
-    settings.PLAYWRIGHT_TIMEOUT = overrides.get("timeout", 30000)
-    settings.BROWSER_DEBUG = overrides.get("browser_debug", True)
-    return settings
+def _make_settings(**overrides) -> Settings:
+    """Real `Settings`, `_env_file=None` so local `.env` cannot leak into tests."""
+    return Settings(
+        _env_file=None,
+        TELEGRAM_TOKEN="test-token",
+        PLAYWRIGHT_TIMEOUT=overrides.get("timeout", 30000),
+        BROWSER_DEBUG=overrides.get("browser_debug", True),
+    )
 
 
 def _make_page() -> MagicMock:
@@ -68,7 +70,9 @@ async def test__save_debug__browser_debug_off__skips_non_error(tmp_path: Path) -
 
 
 @pytest.mark.unit
-async def test__save_debug__browser_debug_off__saves_error_steps(tmp_path: Path) -> None:
+async def test__save_debug__browser_debug_off__saves_error_steps(
+    tmp_path: Path,
+) -> None:
     page = _make_page()
     settings = _make_settings(browser_debug=False)
     pw = MagicMock()

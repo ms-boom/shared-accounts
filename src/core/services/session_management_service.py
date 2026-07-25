@@ -12,6 +12,7 @@ from patchright.async_api import (
 
 from core.config import Settings
 from core.exceptions import BrowserError, SessionError
+from core.fingerprint import EffectiveFingerprint, build_navigator_init_script
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class SessionManagementService:
         self.playwright = playwright
 
     async def _create_persistent_context(
-        self, session_path: Path
+        self, session_path: Path, fingerprint: EffectiveFingerprint
     ) -> BrowserContext:
         """
         Create a persistent browser context for the given session path.
@@ -39,6 +40,11 @@ class SessionManagementService:
         Persistent context stores all cookies, localStorage, and browser state
         in user_data_dir. This avoids manual storage_state management and
         presents a consistent browser fingerprint to Cloudflare.
+
+        The resolved fingerprint's user_agent/locale/timezone are applied as
+        launch kwargs; cpu_cores/device_memory are applied via an init script
+        installed before any navigation, so every subsequent `goto` on this
+        context's page observes the overridden `navigator` properties.
         """
         session_path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -50,18 +56,25 @@ class SessionManagementService:
             singleton_lock.unlink()
             logger.warning("Removed stale SingletonLock from %s", session_path)
 
-        return await self.playwright.chromium.launch_persistent_context(
+        context = await self.playwright.chromium.launch_persistent_context(
             user_data_dir=str(session_path),
             channel="chrome",
             headless=self.settings.PLAYWRIGHT_HEADLESS,
             no_viewport=True,
             args=["--window-size=1920,1080"],
             ignore_default_args=["--enable-automation"],
+            user_agent=fingerprint.user_agent,
+            locale=fingerprint.locale,
+            timezone_id=fingerprint.timezone,
         )
+        await context.add_init_script(
+            build_navigator_init_script(
+                fingerprint.cpu_cores, fingerprint.device_memory
+            )
+        )
+        return context
 
-    async def _save_debug(
-        self, page: Page, session_path: Path, step_name: str
-    ) -> None:
+    async def _save_debug(self, page: Page, session_path: Path, step_name: str) -> None:
         """Save screenshot and HTML for debugging."""
         is_error = step_name.startswith("error_")
         if not is_error and not self.settings.BROWSER_DEBUG:
@@ -93,18 +106,25 @@ class SessionManagementService:
         except PlaywrightTimeoutError:
             pass
 
-    async def initialize_session(self, session_path: Path, email: str) -> str:
+    async def initialize_session(
+        self, session_path: Path, email: str, *, fingerprint: EffectiveFingerprint
+    ) -> str:
         """
         Initialize Claude session at specific path.
 
         Opens login page, fills email, submits. Waits for either
         verification code input or "Check your email" confirmation.
+
+        Args:
+            session_path: Path to the Playwright session directory
+            email: Email address for Claude account
+            fingerprint: Resolved fingerprint applied to the browser context
         """
         context: BrowserContext | None = None
         page: Page | None = None
 
         try:
-            context = await self._create_persistent_context(session_path)
+            context = await self._create_persistent_context(session_path, fingerprint)
             page = context.pages[0] if context.pages else await context.new_page()
 
             await page.goto(
@@ -121,9 +141,7 @@ class SessionManagementService:
             await email_input.fill(email, timeout=self.settings.PLAYWRIGHT_TIMEOUT)
             logger.info(f"Filled email for session {session_path}")
 
-            continue_button = page.locator(
-                'button:has-text("Continue with email")'
-            )
+            continue_button = page.locator('button:has-text("Continue with email")')
             await continue_button.click()
             await self._save_debug(page, session_path, "02_after_submit")
 
@@ -133,13 +151,11 @@ class SessionManagementService:
                 'input[placeholder*="verification"], '
                 'input[placeholder*="code"]'
             )
-            confirmation_text = page.get_by_text(
-                "Check your email"
-            ).or_(page.get_by_text(
-                "verification code"
-            )).or_(page.get_by_text(
-                "Verify"
-            ))
+            confirmation_text = (
+                page.get_by_text("Check your email")
+                .or_(page.get_by_text("verification code"))
+                .or_(page.get_by_text("Verify"))
+            )
             combined = code_input.or_(confirmation_text)
             try:
                 await combined.first.wait_for(
@@ -158,45 +174,45 @@ class SessionManagementService:
             )
 
         except PlaywrightTimeoutError as e:
-            logger.error(
-                f"Timeout during session init for {session_path}: {e}"
-            )
+            logger.error(f"Timeout during session init for {session_path}: {e}")
             if page:
                 await self._save_debug(page, session_path, "error_init")
             raise BrowserError(
                 "❌ Operation timed out. The page took too long to respond."
             ) from e
         except Exception as e:
-            logger.error(
-                f"Failed to initialize session at {session_path}: {e}"
-            )
+            logger.error(f"Failed to initialize session at {session_path}: {e}")
             if page:
                 await self._save_debug(page, session_path, "error_init")
-            raise BrowserError(
-                f"❌ Failed to initialize session: {str(e)}"
-            ) from e
+            raise BrowserError(f"❌ Failed to initialize session: {str(e)}") from e
         finally:
             if context:
                 await context.close()
 
-    async def process_login(self, session_path: Path, login_url: str) -> str:
+    async def process_login(
+        self, session_path: Path, login_url: str, *, fingerprint: EffectiveFingerprint
+    ) -> str:
         """
         Process Claude login link to complete authentication.
 
         Opens the magic link URL in persistent context, then verifies
         the session by navigating to /settings/usage.
+
+        Args:
+            session_path: Path to the Playwright session directory
+            login_url: Login URL from email
+            fingerprint: Resolved fingerprint applied to the browser context
         """
         if not session_path.exists():
             raise SessionError(
-                f"❌ No session found at {session_path}. "
-                "Run init-session first."
+                f"❌ No session found at {session_path}. Run init-session first."
             )
 
         context: BrowserContext | None = None
         page: Page | None = None
 
         try:
-            context = await self._create_persistent_context(session_path)
+            context = await self._create_persistent_context(session_path, fingerprint)
             page = context.pages[0] if context.pages else await context.new_page()
 
             # Step 1: Open magic link
@@ -207,9 +223,7 @@ class SessionManagementService:
                     wait_until="domcontentloaded",
                 )
             except PlaywrightTimeoutError as e:
-                logger.error(
-                    f"Timeout loading magic link for {session_path}: {e}"
-                )
+                logger.error(f"Timeout loading magic link for {session_path}: {e}")
                 if page:
                     await self._save_debug(page, session_path, "error_login")
                 raise BrowserError(
@@ -229,19 +243,12 @@ class SessionManagementService:
                 state="visible",
             )
             await self._save_debug(page, session_path, "05_authenticated")
-            logger.info(
-                f"Authentication successful for session {session_path}"
-            )
+            logger.info(f"Authentication successful for session {session_path}")
 
-            return (
-                "✅ Session initialized successfully! "
-                "You can now use /get_code."
-            )
+            return "✅ Session initialized successfully! You can now use /get_code."
 
         except PlaywrightTimeoutError as e:
-            logger.error(
-                f"Timeout verifying session for {session_path}: {e}"
-            )
+            logger.error(f"Timeout verifying session for {session_path}: {e}")
             if page:
                 await self._save_debug(page, session_path, "error_login")
             raise BrowserError(
@@ -251,33 +258,35 @@ class SessionManagementService:
         except BrowserError:
             raise
         except Exception as e:
-            logger.error(
-                f"Failed to process login link for {session_path}: {e}"
-            )
+            logger.error(f"Failed to process login link for {session_path}: {e}")
             if page:
                 await self._save_debug(page, session_path, "error_login")
-            raise BrowserError(
-                f"❌ Failed to process login link: {str(e)}"
-            ) from e
+            raise BrowserError(f"❌ Failed to process login link: {str(e)}") from e
         finally:
             if context:
                 await context.close()
 
-    async def extract_code(self, session_path: Path, auth_url: str) -> str:
+    async def extract_code(
+        self, session_path: Path, auth_url: str, *, fingerprint: EffectiveFingerprint
+    ) -> str:
         """
         Extract authorization code from Claude authorization page.
+
+        Args:
+            session_path: Path to the Playwright session directory
+            auth_url: Authorization URL from Claude Code
+            fingerprint: Resolved fingerprint applied to the browser context
         """
         if not session_path.exists():
             raise SessionError(
-                f"❌ No active session found at {session_path}. "
-                "Run init-session first."
+                f"❌ No active session found at {session_path}. Run init-session first."
             )
 
         context: BrowserContext | None = None
         page: Page | None = None
 
         try:
-            context = await self._create_persistent_context(session_path)
+            context = await self._create_persistent_context(session_path, fingerprint)
             page = context.pages[0] if context.pages else await context.new_page()
 
             await page.goto(
@@ -327,29 +336,20 @@ class SessionManagementService:
             return code.strip()
 
         except PlaywrightTimeoutError as e:
-            logger.error(
-                f"Timeout extracting code for {session_path}: {e}"
-            )
+            logger.error(f"Timeout extracting code for {session_path}: {e}")
             if page:
                 await self._save_debug(page, session_path, "error_extract")
             raise BrowserError(
-                "❌ Operation timed out. "
-                "Could not extract authorization code."
+                "❌ Operation timed out. Could not extract authorization code."
             ) from e
         except SessionError:
             raise
         except Exception as e:
-            logger.error(
-                f"Failed to extract code for {session_path}: {e}"
-            )
+            logger.error(f"Failed to extract code for {session_path}: {e}")
             if page:
                 await self._save_debug(page, session_path, "error_extract")
 
-            if (
-                "401" in str(e)
-                or "403" in str(e)
-                or "unauthorized" in str(e).lower()
-            ):
+            if "401" in str(e) or "403" in str(e) or "unauthorized" in str(e).lower():
                 raise SessionError(
                     f"❌ Session expired or invalid at {session_path}. "
                     "Please run init-session again."

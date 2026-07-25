@@ -1,0 +1,51 @@
+# Shared Accounts / Claude Authorization Bot
+
+> Telegram bot (aiogram 3.x) that automates obtaining Claude Code authorization
+> codes via a headless browser (Patchright/Playwright), so users get codes in
+> Telegram instead of manually opening email and copying links. Sessions are
+> isolated per (chat_id, thread_id) — including Telegram Topics — and each
+> session can carry its own browser fingerprint (User-Agent, CPU/memory,
+> timezone, locale) to make different Claude accounts look like different
+> devices.
+
+## Architecture
+
+- [Module Hierarchy](llms-full.txt#module-hierarchy): `src/core` (domain, no Telegram deps) vs `src/bot` (presentation layer), enforced by import-linter
+- [Data Flow](llms-full.txt#data-flow): Telegram update → handler writes a Task row → embedded TaskWorker → Patchright → notifier reply
+
+## Key Patterns
+
+- [SQLite single-writer serialization](llms-full.txt#sqlite-single-writer-serialization): all writes go through `Database.write()` / `SQLiteWriterQueue`; reads bypass it (WAL)
+- [Repository Pattern](llms-full.txt#repository-pattern-session-injected-no-commit): session-injected repositories, `flush()` not `commit()`
+- [Per-field fallback resolution](llms-full.txt#per-field-fallback-resolution-fingerprint): fingerprint resolution merges stored values with a default profile, field by field
+- [Orphan-cleanup rule](llms-full.txt#orphan-cleanup-rule-fingerprint-sharing): shared fingerprints are deleted once their last binding is removed
+- [Optimistic locking on tasks](llms-full.txt#optimistic-locking-on-tasks): `Task.version` guards concurrent status updates
+- [Access control](llms-full.txt#access-control-private--self-group--admin): private chat = self, group = admin (shared rule across the fingerprint feature)
+- [Middleware chain](llms-full.txt#middleware-chain): ErrorHandlerMiddleware wraps GroupTrackerMiddleware
+- [FSM via SQLite](llms-full.txt#fsm-via-sqlite-survives-restarts): `BotFSMStorage` persists aiogram FSM state across restarts
+
+## Browser Fingerprint Feature
+
+- [Browser Fingerprint Feature](llms-full.txt#browser-fingerprint-feature): `/fingerprint` command, 5-step FSM (set own / edit shared / copy / reset), `fingerprints` + `session_fingerprints` tables (migration 002), how it's applied in the browser context
+
+## Module Responsibilities
+
+- [Module Responsibilities](llms-full.txt#module-responsibilities): compressed map of every core/bot module to its file path
+
+## Configuration
+
+- [Configuration](llms-full.txt#configuration): env vars (`TELEGRAM_TOKEN`, `DATABASE_URL`, `SESSION_DIR`, Playwright/worker/permission-cache settings, `DEFAULT_*` fingerprint profile), Docker layout
+
+## Development
+
+- [Setup](llms-full.txt#setup): `uv sync`, `.env`, `task db:upgrade`
+- [Commands](llms-full.txt#commands): `task run` / `run:worker` / `run:cli`, `task format` / `lint` / `test` / `qa`, `task db:*`
+- [Testing](llms-full.txt#testing): pytest with SQLite + Alembic-applied test DB, transactional isolation via savepoints, 52 unit test files
+
+## Common Pitfalls
+
+- [Common Pitfalls](llms-full.txt#common-pitfalls): don't commit/close inside `database.write()`, don't run the standalone worker alongside the bot, `None` fingerprint fields are meaningful, `created_by` is audit-only not authority, root `CLAUDE.md`/`README.md`/`TESTING_GUIDE.md` describe a stale `bot/`-package/PostgreSQL layout — trust `src/` and this file instead
+
+## Reference
+
+- [Full Documentation](llms-full.txt): Complete project context — architecture, patterns, module map, configuration, pitfalls, and development workflow

@@ -37,6 +37,12 @@ class UserNotFoundError(BotError):
     pass
 
 
+class FingerprintNotFoundError(BotError):
+    """Raised when a fingerprint is not found in the database."""
+
+    pass
+
+
 class BrowserError(BotError):
     """Raised when Playwright browser operations fail."""
 

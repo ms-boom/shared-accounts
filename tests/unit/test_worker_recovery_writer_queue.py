@@ -1,6 +1,6 @@
 """Tests verifying TaskWorker recovery routes writes through db.write()."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -21,6 +21,12 @@ def _make_test_settings() -> MagicMock:
     settings.SESSION_DIR = "/tmp/test_sessions"
     settings.DATA_DIR = "/tmp/test_data"
     settings.ERROR_DIR = "/tmp/test_errors"
+    # Accessed by FingerprintResolutionService, built inside TaskWorker.__init__.
+    settings.DEFAULT_USER_AGENT = "Mozilla/5.0 (Test)"
+    settings.DEFAULT_CPU_CORES = 8
+    settings.DEFAULT_DEVICE_MEMORY = 8
+    settings.DEFAULT_TIMEZONE = "America/New_York"
+    settings.DEFAULT_LOCALE = "en-US"
     return settings
 
 
@@ -37,7 +43,8 @@ async def test__recovery__uses_write(
     async with db_sessionmaker() as session, session.begin():
         repo = TaskRepository(session)
         task = await repo.create(
-            chat_id=123, user_id=456,
+            chat_id=123,
+            user_id=456,
             task_type="init_session",
             payload={"email": "test@example.com"},
         )

@@ -11,6 +11,7 @@ from core.db.repositories.chat_session_repository import ChatSessionRepository
 from core.db.repositories.task_repository import TaskRepository
 from core.exceptions import BrowserError, SessionError, TaskError
 from core.ports import LoggingNotifier, TaskNotifier
+from core.services.fingerprint_resolution_service import FingerprintResolutionService
 from core.worker.playwright_service import PlaywrightService
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,9 @@ class TaskWorker:
         self.db = database
         self.settings = settings
         self.notifier: TaskNotifier = notifier or LoggingNotifier()
-        self.playwright = PlaywrightService(settings)
+        self.playwright = PlaywrightService(
+            settings, FingerprintResolutionService(settings), self.db
+        )
         self.running = False
         self.recovery_task: asyncio.Task | None = None
 

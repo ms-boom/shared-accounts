@@ -70,9 +70,7 @@ class FakeLocator:
         """Find first matching element in page's current state."""
         for kind, pattern in self._queries:
             registry = (
-                self._page._css_elements
-                if kind == "css"
-                else self._page._text_elements
+                self._page._css_elements if kind == "css" else self._page._text_elements
             )
             state_elements = registry.get(self._page.state, {})
             for key, elem in state_elements.items():
@@ -88,7 +86,7 @@ class FakeLocator:
         if elem.on_click_goto_state:
             self._page.state = elem.on_click_goto_state
 
-    async def fill(self, value: str) -> None:
+    async def fill(self, value: str, timeout: int = 30000) -> None:
         elem = self._resolve()
         if elem is None:
             raise PlaywrightTimeoutError(f"Timeout: {self._queries}")
@@ -129,6 +127,10 @@ class FakePage:
         self.goto_history: list[str] = []
         self.filled: dict[str, str] = {}
         self.screenshot_paths: list[str] = []
+        self.init_scripts: list[str] = []
+
+    async def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
 
     async def goto(self, url: str, **kwargs: object) -> None:
         if self._goto_error:
@@ -184,12 +186,17 @@ class FakeBrowserContext:
     def __init__(self, page: FakePage) -> None:
         self.pages: list[FakePage] = [page]
         self.closed = False
+        self.launch_kwargs: dict[str, object] = {}
+        self.init_scripts: list[str] = []
 
     async def new_page(self) -> FakePage:
         return self.pages[0]
 
     async def close(self) -> None:
         self.closed = True
+
+    async def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
 
 
 class FakePlaywright:
@@ -204,6 +211,7 @@ class _FakeChromium:
         self._context = context
 
     async def launch_persistent_context(self, **kwargs: object) -> FakeBrowserContext:
+        self._context.launch_kwargs = dict(kwargs)
         return self._context
 
 

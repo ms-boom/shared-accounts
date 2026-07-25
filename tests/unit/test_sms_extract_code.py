@@ -13,6 +13,7 @@ import pytest
 
 from core.config import Settings
 from core.exceptions import BrowserError, SessionError
+from core.fingerprint import EffectiveFingerprint
 from core.services.session_management_service import SessionManagementService
 from tests.fixtures.fake_browser import (
     FakeBrowserContext,
@@ -27,11 +28,29 @@ from tests.fixtures.fake_browser import (
 # ---------------------------------------------------------------------------
 
 
-def _make_settings() -> MagicMock:
-    settings = MagicMock(spec=Settings)
-    settings.PLAYWRIGHT_TIMEOUT = 30000
-    settings.BROWSER_DEBUG = True
-    return settings
+def _make_settings() -> Settings:
+    """Real `Settings`, `_env_file=None` so local `.env` cannot leak into tests."""
+    return Settings(
+        _env_file=None,
+        TELEGRAM_TOKEN="test-token",
+        PLAYWRIGHT_TIMEOUT=30000,
+        BROWSER_DEBUG=True,
+    )
+
+
+def _default_fingerprint() -> EffectiveFingerprint:
+    """Fixed fingerprint value object — these tests exercise value threading,
+    not fingerprint resolution (that's `FingerprintResolutionService`'s job)."""
+    return EffectiveFingerprint(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        cpu_cores=8,
+        device_memory=8,
+        timezone="America/New_York",
+        locale="en-US",
+    )
 
 
 def _make_navigation_context() -> AsyncMock:
@@ -95,9 +114,12 @@ def _build_service(
     """Build service + fake browser stack from a pre-configured FakePage."""
     context = FakeBrowserContext(page)
     playwright = FakePlaywright(context)
-    settings = MagicMock(spec=Settings)
-    settings.PLAYWRIGHT_TIMEOUT = 30000
-    settings.BROWSER_DEBUG = browser_debug
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_TOKEN="test-token",
+        PLAYWRIGHT_TIMEOUT=30000,
+        BROWSER_DEBUG=browser_debug,
+    )
     service = SessionManagementService(settings=settings, playwright=playwright)
     return service, page, context
 
@@ -127,7 +149,11 @@ def _build_code_page(
         css_elements["pre"] = FakeElement(text=auth_code)
     page._css_elements["code_page"] = css_elements
 
-    page._html = {"code_page": "<html><h3>Authentication Code</h3><pre>" + auth_code + "</pre></html>"}
+    page._html = {
+        "code_page": "<html><h3>Authentication Code</h3><pre>"
+        + auth_code
+        + "</pre></html>"
+    }
 
     return page
 
@@ -145,7 +171,9 @@ async def test__extract_code__session_path_missing__raises_session_error(
 
     with pytest.raises(SessionError, match="No active session found"):
         await service.extract_code(
-            tmp_path / "nonexistent", "https://claude.ai/auth/authorize?x=1"
+            tmp_path / "nonexistent",
+            "https://claude.ai/auth/authorize?x=1",
+            fingerprint=_default_fingerprint(),
         )
 
 
@@ -165,7 +193,9 @@ async def test__extract_code__unauthorized__raises_session_error(
 
     with pytest.raises(SessionError, match="Session expired or invalid"):
         await service.extract_code(
-            session_path, "https://claude.ai/auth/authorize?x=1"
+            session_path,
+            "https://claude.ai/auth/authorize?x=1",
+            fingerprint=_default_fingerprint(),
         )
 
 
@@ -187,7 +217,9 @@ async def test__extract_code__timeout__raises_browser_error(
 
     with pytest.raises(BrowserError, match="timed out"):
         await service.extract_code(
-            session_path, "https://claude.ai/auth/authorize?x=1"
+            session_path,
+            "https://claude.ai/auth/authorize?x=1",
+            fingerprint=_default_fingerprint(),
         )
 
 
@@ -206,7 +238,9 @@ async def test__extract_code__reads_code_from_pre_tag(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.extract_code(session_path, AUTH_URL)
+    result = await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     assert result == valid_code
     assert context.closed
@@ -223,7 +257,9 @@ async def test__extract_code__strips_whitespace_from_pre_content(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.extract_code(session_path, AUTH_URL)
+    result = await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     assert result == "CODE_WITH_WHITESPACE_1234567"
 
@@ -240,7 +276,9 @@ async def test__extract_code__pre_empty__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="empty"):
-        await service.extract_code(session_path, AUTH_URL)
+        await service.extract_code(
+            session_path, AUTH_URL, fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
 
@@ -257,7 +295,9 @@ async def test__extract_code__code_too_short__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="empty"):
-        await service.extract_code(session_path, AUTH_URL)
+        await service.extract_code(
+            session_path, AUTH_URL, fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
 
@@ -277,7 +317,9 @@ async def test__extract_code__no_heading__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="timed out"):
-        await service.extract_code(session_path, AUTH_URL)
+        await service.extract_code(
+            session_path, AUTH_URL, fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
 
@@ -297,7 +339,9 @@ async def test__extract_code__no_pre_element__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError, match="timed out"):
-        await service.extract_code(session_path, AUTH_URL)
+        await service.extract_code(
+            session_path, AUTH_URL, fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
 
@@ -320,7 +364,9 @@ async def test__extract_code__authorize_click_then_code_in_pre__returns_code(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.extract_code(session_path, AUTH_URL)
+    result = await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     assert result == "sk-ant-oc01-FAKE_AUTH_CODE_12345678"
     assert page.state == "code_page"
@@ -341,7 +387,9 @@ async def test__extract_code__authorize_with_cookie_popup__returns_code(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.extract_code(session_path, AUTH_URL)
+    result = await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     assert result == "CODE_WITH_COOKIES_TEST_1234"
     assert page.state == "code_page"
@@ -358,7 +406,9 @@ async def test__extract_code__no_authorize_button__code_already_visible(
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    result = await service.extract_code(session_path, AUTH_URL)
+    result = await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     assert result == "DIRECT_CODE_NO_CONSENT_1234"
 
@@ -380,7 +430,9 @@ async def test__extract_code__no_authorize_no_code__raises_browser_error(
     session_path.mkdir()
 
     with pytest.raises(BrowserError):
-        await service.extract_code(session_path, AUTH_URL)
+        await service.extract_code(
+            session_path, AUTH_URL, fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
 
@@ -401,7 +453,9 @@ async def test__extract_code__debug_saves_snapshots(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.extract_code(session_path, AUTH_URL)
+    await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     debug_dir = session_path / "debug"
     assert debug_dir.exists()
@@ -418,7 +472,9 @@ async def test__extract_code__always_closes_context(tmp_path: Path) -> None:
     session_path = tmp_path / "session"
     session_path.mkdir()
 
-    await service.extract_code(session_path, AUTH_URL)
+    await service.extract_code(
+        session_path, AUTH_URL, fingerprint=_default_fingerprint()
+    )
 
     assert context.closed
 
@@ -438,6 +494,8 @@ async def test__extract_code__closes_context_on_error(tmp_path: Path) -> None:
     session_path.mkdir()
 
     with pytest.raises(BrowserError):
-        await service.extract_code(session_path, AUTH_URL)
+        await service.extract_code(
+            session_path, AUTH_URL, fingerprint=_default_fingerprint()
+        )
 
     assert context.closed
