@@ -15,12 +15,20 @@ services:
       # Uncomment if the tunnel fails to come up on an old/custom kernel:
       # - /lib/modules:/lib/modules:ro
     healthcheck:
-      # Tunnel is alive when the peer's last handshake is fresh (< 180s).
-      # A client config has a single peer, so no need to pick the newest of many.
+      # Liveness = a recent WireGuard handshake. This is config-agnostic —
+      # no tunnel address from wg0.conf is referenced.
+      # The leading ping is only a "poke": any outbound packet on wg0 forces a
+      # handshake with the VPN server, so the check never deadlocks at idle
+      # (WireGuard handshakes only when data flows, and the only data here is
+      # the bot's — which won't start until this is green). The poke targets a
+      # universal address, its reachability is irrelevant (the handshake is
+      # with the server, not with 1.1.1.1; this VPN blocks ICMP to the
+      # internet), so its result is ignored.
       # $$ escapes $ for Compose (a single $ reaches the container).
       test:
         - CMD-SHELL
         - >-
+          ping -c1 -W1 1.1.1.1 >/dev/null 2>&1 || true;
           [ $$(( $$(date +%s) - $$(wg show wg0 latest-handshakes | awk '{print $$2}') )) -lt 180 ]
       interval: 30s
       timeout: 5s
